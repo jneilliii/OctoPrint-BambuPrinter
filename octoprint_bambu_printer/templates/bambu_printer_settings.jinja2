@@ -1,0 +1,40 @@
+<h3>Virtual Printer</h3>
+
+<form class="form-horizontal" onsubmit="return false;">
+    <div class="control-group">
+        <label class="control-label">{{ _('Device Type') }}</label>
+        <div class="controls">
+            <select class="input-block-level" data-bind="options: ['A1', 'A1MINI', 'P1P', 'P1S', 'X1', 'X1C'], value: settings.plugins.bambu_printer.device_type, allowUnset: true">
+            </select>
+        </div>
+    </div>
+	<div class="control-group">
+		<label class="control-label">{{ _('IP Address') }}</label>
+		<div class="controls">
+			<input type="text" class="input-block-level" data-bind="value: settings.plugins.bambu_printer.host" placeholder="192.168.0.2" title="{{ _('IP address or hostname of the printer') }}"></input>
+		</div>
+	</div>
+	<div class="control-group">
+		<label class="control-label">{{ _('Serial Number') }}</label>
+		<div class="controls">
+			<input type="text" class="input-block-level" data-bind="value: settings.plugins.bambu_printer.serial" title="{{ _('Serial number of printer') }}"></input>
+		</div>
+	</div>
+	<div class="control-group">
+		<label class="control-label">{{ _('Access Code') }}</label>
+		<div class="controls">
+			<input type="text" class="input-block-level" data-bind="value: settings.plugins.bambu_printer.access_code" title="{{ _('Access code of printer') }}"></input>
+		</div>
+	</div>
+	<div class="control-group">
+        <label class="control-label">{{ _('Print Options') }}</label>
+        <div class="controls">
+            <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.timelapse"> {{ _('Enable timelapse') }}</label>
+            <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.bed_leveling"> {{ _('Enable bed leveling') }}</label>
+            <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.flow_cali"> {{ _('Enable flow calibration') }}</label>
+            <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.vibration_cali"> {{ _('Enable vibration calibration') }}</label>
+            <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.layer_inspect"> {{ _('Enable first layer inspection') }}</label>
+            <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.use_ams"> {{ _('Use AMS') }}</label>
+        </div>
+    </div>
+</form>
