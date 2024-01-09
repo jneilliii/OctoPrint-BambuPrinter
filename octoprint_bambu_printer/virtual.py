@@ -463,6 +463,11 @@ class BambuPrinter:
             self._pauseSdPrint()
         return True
 
+    def _gcode_M524(self, data: str) -> bool:
+        if self._sdCardReady:
+            self._cancelSdPrint()
+        return False
+
     def _gcode_M26(self, data: str) -> bool:
         self._logger.debug("ignoring M26 command.")
         self._send("M26 disabled for Bambu")
@@ -682,6 +687,13 @@ class BambuPrinter:
             else:
                 self._logger.info("print pause failed")
 
+    def _cancelSdPrint(self):
+        if self.bambu.connected:
+            if self.bambu.publish(commands.STOP):
+                self._logger.info("print cancelled")
+            else:
+                self._logger.info("print cancel failed")
+
     def _setSdPos(self, pos):
         self._newSdFilePos = pos
 
@@ -694,10 +706,10 @@ class BambuPrinter:
     def _generateTemperatureOutput(self) -> str:
         template = "{heater}:{actual:.2f}/ {target:.2f}"
         temps = collections.OrderedDict()
-        heater = "T"
-        temps[heater] = (self.temp[0], self.targetTemp[0])
+        temps["T"] = (self.temp[0], self.targetTemp[0])
         temps["B"] = (self.bedTemp, self.bedTargetTemp)
-        temps["C"] = (self.chamberTemp, self.chamberTargetTemp)
+        if self._printer_profile_manager.get_current().get("heatedChamber"):
+            temps["C"] = (self.chamberTemp, self.chamberTargetTemp)
 
         output = " ".join(
             map(
