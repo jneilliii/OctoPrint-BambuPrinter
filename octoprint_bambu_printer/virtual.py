@@ -3,6 +3,7 @@ __license__ = "GNU Affero General Public License http://www.gnu.org/licenses/agp
 
 
 import collections
+import datetime
 import os
 import queue
 import re
@@ -14,6 +15,7 @@ from pybambu import BambuClient, commands
 
 from serial import SerialTimeoutException
 from octoprint.util import RepeatedTimer, to_bytes, to_unicode, get_dos_filename
+from octoprint.util.files import unix_timestamp_to_m20_timestamp
 
 from .ftpsclient import IoTFTPSClient
 
@@ -45,10 +47,11 @@ class BambuPrinter:
             }
         self._sendBusy = False
         self._ambient_temperature = 21.3
-        self.temp = [self._ambient_temperature ]
+        self.temp = [self._ambient_temperature]
         self.targetTemp = [0.0]
         self.bedTemp = self._ambient_temperature
         self.bedTargetTemp = 0.0
+        self._hasChamber = printer_profile_manager.get_current().get("heatedChamber")
         self.chamberTemp = self._ambient_temperature
         self.chamberTargetTemp = 0.0
         self.lastTempAt = time.monotonic()
@@ -128,6 +131,7 @@ class BambuPrinter:
         # )
         # bufferThread.start()
 
+        # Move this into M110 command response?
         connectionThread = threading.Thread(
             target=self._create_connection,
             name="octoprint.plugins.bambu_printer.connection_thread",
@@ -603,7 +607,7 @@ class BambuPrinter:
             request_resend()
 
     def _listSd(self, incl_long=False, incl_timestamp=False):
-        line = "{name} {size} \"{name}\""
+        line = "{dosname} {size} {timestamp} \"{name}\""
 
         self._send("Begin file list")
         for item in map(lambda x: line.format(**x), self._getSdFiles()):
@@ -624,20 +628,24 @@ class BambuPrinter:
             else:
                 filename = entry
             filesize = ftp.ftps_session.size(entry)
+            date_str = ftp.ftps_session.sendcmd(f"MDTM {entry}").replace("213 ", "")
+            filedate = datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S").replace(tzinfo=datetime.timezone.utc).timestamp()
             dosname = get_dos_filename(filename, existing_filenames=list(result.keys())).lower()
             data = {
                 "dosname": dosname,
                 "name": filename,
                 "path": filename,
                 "size": filesize,
+                "timestamp": unix_timestamp_to_m20_timestamp(int(filedate))
             }
             result[filename.lower()] = data
-            # result[dosname.lower()] = filename.lower()
+            result[dosname.lower()] = filename.lower()
 
         return result
 
     def _getSdFileData(self, filename: str) -> Optional[Dict[str, Any]]:
         files = self._mappedSdList()
+        # TODO: swap this out to use 8 dot 3 name to find long name/path
         data = files.get(filename.lower())
         if isinstance(data, str):
             data = files.get(data.lower())
@@ -708,7 +716,7 @@ class BambuPrinter:
         temps = collections.OrderedDict()
         temps["T"] = (self.temp[0], self.targetTemp[0])
         temps["B"] = (self.bedTemp, self.bedTargetTemp)
-        if self._printer_profile_manager.get_current().get("heatedChamber"):
+        if self._hasChamber:
             temps["C"] = (self.chamberTemp, self.chamberTargetTemp)
 
         output = " ".join(
