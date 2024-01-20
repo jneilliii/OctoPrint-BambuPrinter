@@ -170,6 +170,7 @@ class BambuPrinter:
                     self._sdPrintingPausedSemaphore.clear()
                 if not self._sdPrinting:
                     filename = info.get("subtask_name")
+                    # TODO: swap this out to use 8 dot 3 name based on long name/path
                     self._selectSdFile(filename)
                     self._startSdPrint(from_printer=True)
 
@@ -645,7 +646,6 @@ class BambuPrinter:
 
     def _getSdFileData(self, filename: str) -> Optional[Dict[str, Any]]:
         files = self._mappedSdList()
-        # TODO: swap this out to use 8 dot 3 name to find long name/path
         data = files.get(filename.lower())
         if isinstance(data, str):
             data = files.get(data.lower())
@@ -761,7 +761,7 @@ class BambuPrinter:
                                            "command": "project_file",
                                            "param": "Metadata/plate_1.gcode",
                                            "subtask_name": f"{self._selectedSdFile}",
-                                           "url": f"file:///mnt/sdcard/{self._selectedSdFile}",
+                                           "url": f"file:///mnt/sdcard/{self._selectedSdFile}" if self._settings.get_boolean(["device_type"]) in ["X1", "X1C"] else f"file:///sdcard/{self._selectedSdFile}",
                                            "timelapse": self._settings.get_boolean(["timelapse"]),
                                            "bed_leveling": self._settings.get_boolean(["bed_leveling"]),
                                            "flow_cali": self._settings.get_boolean(["flow_cali"]),
