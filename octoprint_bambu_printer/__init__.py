@@ -27,7 +27,11 @@ class BambuPrintPlugin(
                 "flow_cali": False,
                 "vibration_cali": True,
                 "layer_inspect": True,
-                "use_ams": False}
+                "use_ams": False,
+                "local_mqtt": True,
+                "region": "",
+                "email": "",
+                "auth_token": ""}
 
     def support_3mf_files(self):
         return {'machinecode': {'3mf': ["3mf"]}}

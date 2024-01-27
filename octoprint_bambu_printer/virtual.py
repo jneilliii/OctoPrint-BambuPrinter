@@ -151,7 +151,7 @@ class BambuPrinter:
         elif event_type == "event_printer_data_update":
             device_data = self.bambu.get_device()
             ams = device_data.ams.__dict__
-            info = device_data.info.__dict__
+            print_job = device_data.print_job.__dict__
             temperatures = device_data.temperature.__dict__
             lights = device_data.lights.__dict__
             fans = device_data.fans.__dict__
@@ -163,21 +163,21 @@ class BambuPrinter:
             self.bedTargetTemp = temperatures.get("target_bed_temp", 0.0)
             self.chamberTemp = temperatures.get("chamber_temp", 0.0)
 
-            if info.get("gcode_state") == "RUNNING":
+            if print_job.get("gcode_state") == "RUNNING":
                 if not self._sdPrintingSemaphore.is_set():
                     self._sdPrintingSemaphore.set()
                 if self._sdPrintingPausedSemaphore.is_set():
                     self._sdPrintingPausedSemaphore.clear()
                 if not self._sdPrinting:
-                    filename = info.get("subtask_name")
+                    filename = print_job.get("subtask_name")
                     # TODO: swap this out to use 8 dot 3 name based on long name/path
                     self._selectSdFile(filename)
                     self._startSdPrint(from_printer=True)
 
                 # fuzzy math here to get print percentage to match BambuStudio
-                self._selectedSdFilePos = int(self._selectedSdFileSize * ((info.get("print_percentage") + 1)/100))
+                self._selectedSdFilePos = int(self._selectedSdFileSize * ((print_job.get("print_percentage") + 1)/100))
 
-            if info.get("gcode_state") == "PAUSE":
+            if print_job.get("gcode_state") == "PAUSE":
                 if not self._sdPrintingPausedSemaphore.is_set():
                     self._sdPrintingPausedSemaphore.set()
                 if self._sdPrintingSemaphore.is_set():
@@ -185,7 +185,7 @@ class BambuPrinter:
                     self._send("// action:paused")
                     self._sendPaused()
 
-            if info.get("gcode_state") == "FINISH" and self._sdPrintingSemaphore.is_set():
+            if print_job.get("gcode_state") == "FINISH" and self._sdPrintingSemaphore.is_set():
                 self._selectedSdFilePos = self._selectedSdFileSize
                 self._finishSdPrint()
     def _create_connection(self):
@@ -202,10 +202,14 @@ class BambuPrinter:
                                  serial=self._settings.get(["serial"]),
                                  host=self._settings.get(["host"]),
                                  username=self._settings.get(["username"]),
-                                 access_code=self._settings.get(["access_code"])
+                                 access_code=self._settings.get(["access_code"]),
+                                 local_mqtt=self._settings.get_boolean(["local_mqtt"]),
+                                 region=self._settings.get(["region"]),
+                                 email=self._settings.get(["email"]),
+                                 auth_token=self._settings.get(["auth_token"])
                                  )
 
-        await self.bambu.connect(callback=self.new_update)
+        self.bambu.connect(callback=self.new_update)
         self._logger.info(f"bambu connection status: {self.bambu.connected}")
         self._sendOk()
         # while True:
