@@ -1,2 +1,1 @@
-from ._client import IoTFTPSClient
-from ._version import __version__
+from .ftpsclient import IoTFTPSClient
