@@ -509,8 +509,8 @@ class BambuPrinter:
 
     # noinspection PyUnusedLocal
     def _gcode_M29(self, data: str) -> bool:
-        self._logger.debug("ignoring M28 command.")
-        self._send("M28 disabled for Bambu")
+        self._logger.debug("ignoring M29 command.")
+        self._send("M29 disabled for Bambu")
         return True
 
     def _gcode_M30(self, data: str) -> bool:
@@ -811,7 +811,7 @@ class BambuPrinter:
         if file is not None:
             ftp = IoTFTPSClient(f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True)
             try:
-                if ftp.delete_file(filename):
+                if ftp.delete_file(file["path"]):
                     self._logger.debug(f"{filename} deleted")
                 else:
                     raise Exception("delete failed")
