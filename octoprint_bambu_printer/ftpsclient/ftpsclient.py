@@ -125,7 +125,7 @@ class IoTFTPSClient:
         with open(dest, "wb") as file:
             self.ftps_session.retrbinary(f"RETR {source}", file.write)
 
-    def upload_file(self, source: str, dest: str, callback=None):
+    def upload_file(self, source: str, dest: str, callback=None) -> bool:
         """upload a file to a path inside the FTPS server"""
 
         file_size = os.path.getsize(source)
@@ -133,43 +133,50 @@ class IoTFTPSClient:
         block_size = max(file_size // 100, 8192)
         rest = None
 
-        # Taken from ftplib.storbinary but with custom ssl handling
-        # due to the shitty bambu p1p ftps server TODO fix properly.
-        with open(source, "rb") as fp:
-            self.ftps_session.voidcmd('TYPE I')
+        try:
+            # Taken from ftplib.storbinary but with custom ssl handling
+            # due to the shitty bambu p1p ftps server TODO fix properly.
+            with open(source, "rb") as fp:
+                self.ftps_session.voidcmd('TYPE I')
 
-            with self.ftps_session.transfercmd(f"STOR {dest}", rest) as conn:
-                while 1:
-                    buf = fp.read(block_size)
+                with self.ftps_session.transfercmd(f"STOR {dest}", rest) as conn:
+                    while 1:
+                        buf = fp.read(block_size)
 
-                    if not buf:
-                        break
+                        if not buf:
+                            break
 
-                    conn.sendall(buf)
+                        conn.sendall(buf)
 
-                    if callback:
-                        callback(buf)
+                        if callback:
+                            callback(buf)
 
-                # shutdown ssl layer
-                if ftplib._SSLSocket is not None and isinstance(conn, ftplib._SSLSocket):
-                    # Yeah this is suposed to be conn.unwrap
-                    # But since we operate in prot p mode
-                    # we can close the connection always.
-                    # This is cursed but it works.
-                    if "vsFTPd" in self.welcome:
-                        conn.unwrap()
-                    else:
-                        conn.shutdown(socket.SHUT_RDWR)
+                    # shutdown ssl layer
+                    if ftplib._SSLSocket is not None and isinstance(conn, ftplib._SSLSocket):
+                        # Yeah this is suposed to be conn.unwrap
+                        # But since we operate in prot p mode
+                        # we can close the connection always.
+                        # This is cursed but it works.
+                        if "vsFTPd" in self.welcome:
+                            conn.unwrap()
+                        else:
+                            conn.shutdown(socket.SHUT_RDWR)
 
-            return self.ftps_session.voidresp()
+                return True
+        except Exception as ex:
+            print(f"unexpected exception occurred: {ex}")
+            pass
+        return False
 
-            # Old api call.
-            # self.ftps_session.storbinary(
-            #    f"STOR {dest}", file, blocksize=block_size, callback=callback)
-
-    def delete_file(self, path: str):
+    def delete_file(self, path: str) -> bool:
         """delete a file from under a path inside the FTPS server"""
-        self.ftps_session.delete(path)
+        try:
+            self.ftps_session.delete(path)
+            return True
+        except Exception as ex:
+            print(f"unexpected exception occurred: {ex}")
+            pass
+        return False
 
     def move_file(self, source: str, dest: str):
         """move a file inside the FTPS server to another path inside the FTPS server"""
