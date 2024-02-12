@@ -68,6 +68,7 @@ class BambuPrinter:
         self._sdCardReady = True
         self._sdPrinter = None
         self._sdPrinting = False
+        self._sdPrintStarting = False
         self._sdPrintingSemaphore = threading.Event()
         self._sdPrintingPausedSemaphore = threading.Event()
         self._selectedSdFile = None
@@ -163,13 +164,14 @@ class BambuPrinter:
             self.bedTargetTemp = temperatures.get("target_bed_temp", 0.0)
             self.chamberTemp = temperatures.get("chamber_temp", 0.0)
 
-            if print_job.get("gcode_state") == "RUNNING":
+            if print_job.get("gcode_state") == "RUNNING" or print_job.get("gcode_state") == "PREPARE":
                 if not self._sdPrintingSemaphore.is_set():
                     self._sdPrintingSemaphore.set()
                 if self._sdPrintingPausedSemaphore.is_set():
                     self._sdPrintingPausedSemaphore.clear()
+                self._sdPrintStarting = False
                 if not self._sdPrinting:
-                    filename = print_job.get("subtask_name")
+                    filename = print_job.get("gcode_file")
                     # TODO: swap this out to use 8 dot 3 name based on long name/path
                     self._selectSdFile(filename)
                     self._startSdPrint(from_printer=True)
@@ -185,9 +187,12 @@ class BambuPrinter:
                     self._send("// action:paused")
                     self._sendPaused()
 
-            if print_job.get("gcode_state") == "FINISH" and self._sdPrintingSemaphore.is_set():
-                self._selectedSdFilePos = self._selectedSdFileSize
-                self._finishSdPrint()
+            if ( print_job.get("gcode_state") == "FINISH" or print_job.get("gcode_state") == "FAILED" ):
+                if self._sdPrintStarting is False:
+                    self._sdPrinting = False
+                if self._sdPrintingSemaphore.is_set():
+                    self._selectedSdFilePos = self._selectedSdFileSize
+                    self._finishSdPrint()
     def _create_connection(self):
         if (self._settings.get(["device_type"]) != "" and
             self._settings.get(["serial"]) != "" and
@@ -241,6 +246,7 @@ class BambuPrinter:
 
             self._sdCardReady = True
             self._sdPrinting = False
+            self._sdPrintStarting = False
             if self._sdPrinter:
                 self._sdPrinting = False
                 self._sdPrintingSemaphore.clear()
@@ -429,6 +435,14 @@ class BambuPrinter:
                     else:
                         self._sendOk()
 
+                    if self.bambu.connected:
+                        GCODE_COMMAND = commands.SEND_GCODE_TEMPLATE
+                        GCODE_COMMAND['print']['param'] = data + "\n"
+                        if self.bambu.publish(GCODE_COMMAND):
+                            self._logger.info("command sent successfully")
+                            self._sendOk()
+                            continue
+
                 finally:
                     self._logger.debug(f"{data}")
 
@@ -478,9 +492,14 @@ class BambuPrinter:
         return False
 
     def _gcode_M26(self, data: str) -> bool:
-        self._logger.debug("ignoring M26 command.")
-        self._send("M26 disabled for Bambu")
-        return True
+        if data == "M26 S0":
+            if self._sdCardReady:
+                return self._cancelSdPrint()
+            return False
+        else:
+            self._logger.debug("ignoring M26 command.")
+            self._send("M26 disabled for Bambu")
+            return True
 
     def _gcode_M27(self, data: str) -> bool:
         def report():
@@ -643,8 +662,29 @@ class BambuPrinter:
                 "size": filesize,
                 "timestamp": unix_timestamp_to_m20_timestamp(int(filedate))
             }
-            result[filename.lower()] = data
             result[dosname.lower()] = filename.lower()
+            result[filename.lower()] = data
+
+        filelistcache = ftp.list_files("cache/", ".3mf")
+
+        for entry in filelistcache:
+            if entry.startswith("/"):
+                filename = entry[1:]
+            else:
+                filename = entry
+            filesize = ftp.ftps_session.size("cache/"+entry)
+            date_str = ftp.ftps_session.sendcmd(f"MDTM cache/{entry}").replace("213 ", "")
+            filedate = datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S").replace(tzinfo=datetime.timezone.utc).timestamp()
+            dosname = get_dos_filename(filename, existing_filenames=list(result.keys())).lower()
+            data = {
+                "dosname": dosname,
+                "name": filename,
+                "path": "cache/"+filename,
+                "size": filesize,
+                "timestamp": unix_timestamp_to_m20_timestamp(int(filedate))
+            }
+            result[dosname.lower()] = filename.lower()
+            result[filename.lower()] = data
 
         return result
 
@@ -680,6 +720,7 @@ class BambuPrinter:
         if self._selectedSdFile is not None:
             if self._sdPrinter is None:
                 self._sdPrinting = True
+                self._sdPrintStarting = True
                 self._sdPrinter = threading.Thread(target=self._sdPrintingWorker, kwargs={"from_printer": from_printer})
                 self._sdPrinter.start()
         # self._sdPrintingSemaphore.set()
@@ -703,6 +744,7 @@ class BambuPrinter:
         if self.bambu.connected:
             if self.bambu.publish(commands.STOP):
                 self._logger.info("print cancelled")
+                self._finishSdPrint()
                 return True
             else:
                 self._logger.info("print cancel failed")
@@ -712,7 +754,7 @@ class BambuPrinter:
         self._newSdFilePos = pos
 
     def _reportSdStatus(self):
-        if self._sdPrinter is not None and (self._sdPrintingSemaphore.is_set() or self._sdPrintingPausedSemaphore.is_set()):
+        if ( self._sdPrinter is not None or self._sdPrintStarting is True ) and self._selectedSdFileSize > 0:
             self._send(f"SD printing byte {self._selectedSdFilePos}/{self._selectedSdFileSize}")
         else:
             self._send("Not SD printing")
@@ -801,6 +843,7 @@ class BambuPrinter:
             self._selectedSdFilePos = 0
             self._selectedSdFileSize = 0
             self._sdPrinting = False
+            self._sdPrintStarting = False
             self._sdPrinter = None
 
     def _deleteSdFile(self, filename: str) -> None:
