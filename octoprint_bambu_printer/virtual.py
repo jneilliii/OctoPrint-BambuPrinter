@@ -474,7 +474,7 @@ class BambuPrinter:
 
     def _gcode_M524(self, data: str) -> bool:
         if self._sdCardReady:
-            self._cancelSdPrint()
+            return self._cancelSdPrint()
         return False
 
     def _gcode_M26(self, data: str) -> bool:
@@ -699,12 +699,14 @@ class BambuPrinter:
             else:
                 self._logger.info("print pause failed")
 
-    def _cancelSdPrint(self):
+    def _cancelSdPrint(self) -> bool:
         if self.bambu.connected:
             if self.bambu.publish(commands.STOP):
                 self._logger.info("print cancelled")
+                return True
             else:
                 self._logger.info("print cancel failed")
+                return False
 
     def _setSdPos(self, pos):
         self._newSdFilePos = pos
