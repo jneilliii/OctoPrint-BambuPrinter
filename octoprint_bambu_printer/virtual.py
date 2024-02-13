@@ -172,6 +172,8 @@ class BambuPrinter:
                 self._sdPrintStarting = False
                 if not self._sdPrinting:
                     filename = print_job.get("subtask_name")
+                    if filename[-4:].lower() != ".3mf":
+                        filename = print_job.get("gcode_file")
                     self._selectSdFile(filename)
                     self._startSdPrint(from_printer=True)
 
