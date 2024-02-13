@@ -171,8 +171,7 @@ class BambuPrinter:
                     self._sdPrintingPausedSemaphore.clear()
                 self._sdPrintStarting = False
                 if not self._sdPrinting:
-                    filename = print_job.get("gcode_file")
-                    # TODO: swap this out to use 8 dot 3 name based on long name/path
+                    filename = print_job.get("subtask_name")
                     self._selectSdFile(filename)
                     self._startSdPrint(from_printer=True)
 
