@@ -644,7 +644,7 @@ class BambuPrinter:
         access_code = self._settings.get(["access_code"])
 
         ftp = IoTFTPSClient(f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True)
-        filelist = ftp.list_files("", ".3mf")
+        filelist = ftp.list_files("", ".3mf") or []
 
         for entry in filelist:
             if entry.startswith("/"):
@@ -665,7 +665,7 @@ class BambuPrinter:
             result[dosname.lower()] = filename.lower()
             result[filename.lower()] = data
 
-        filelistcache = ftp.list_files("cache/", ".3mf")
+        filelistcache = ftp.list_files("cache/", ".3mf") or []
 
         for entry in filelistcache:
             if entry.startswith("/"):
