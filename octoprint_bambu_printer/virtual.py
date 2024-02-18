@@ -71,12 +71,14 @@ class BambuPrinter:
         self._sdPrintStarting = False
         self._sdPrintingSemaphore = threading.Event()
         self._sdPrintingPausedSemaphore = threading.Event()
+        self._sdFileListCache = {}
         self._selectedSdFile = None
         self._selectedSdFileSize = 0
         self._selectedSdFilePos = 0
 
         self._busy = None
         self._busy_loop = None
+
 
 
         import logging
@@ -172,8 +174,12 @@ class BambuPrinter:
                 self._sdPrintStarting = False
                 if not self._sdPrinting:
                     filename = print_job.get("subtask_name")
-                    if filename[-4:].lower() != ".3mf":
-                        filename = print_job.get("gcode_file")
+                    if not self._sdFileListCache.get(filename.lower()):
+                        if self._sdFileListCache.get(f"{filename.lower()}.3mf"):
+                            filename = f"{filename.lower()}.3mf"
+                        elif self._sdFileListCache.get(f"{filename.lower()}.gcode.3mf"):
+                            filename = f"{filename.lower()}.gcode.3mf"
+
                     self._selectSdFile(filename)
                     self._startSdPrint(from_printer=True)
 
@@ -670,11 +676,11 @@ class BambuPrinter:
 
         for entry in filelistcache:
             if entry.startswith("/"):
-                filename = entry[1:]
+                filename = entry[1:].replace("cache/", "")
             else:
-                filename = entry
-            filesize = ftp.ftps_session.size("cache/"+entry)
-            date_str = ftp.ftps_session.sendcmd(f"MDTM cache/{entry}").replace("213 ", "")
+                filename = entry.replace("cache/", "")
+            filesize = ftp.ftps_session.size(entry)
+            date_str = ftp.ftps_session.sendcmd(f"MDTM {entry}").replace("213 ", "")
             filedate = datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S").replace(tzinfo=datetime.timezone.utc).timestamp()
             dosname = get_dos_filename(filename, existing_filenames=list(result.keys())).lower()
             data = {
@@ -690,15 +696,14 @@ class BambuPrinter:
         return result
 
     def _getSdFileData(self, filename: str) -> Optional[Dict[str, Any]]:
-        files = self._mappedSdList()
-        data = files.get(filename.lower())
+        data = self._sdFileListCache.get(filename.lower())
         if isinstance(data, str):
-            data = files.get(data.lower())
+            data = self._sdFileListCache.get(data.lower())
         return data
 
     def _getSdFiles(self) -> List[Dict[str, Any]]:
-        files = self._mappedSdList()
-        return [x for x in files.values() if isinstance(x, dict)]
+        self._sdFileListCache = self._mappedSdList()
+        return [x for x in self._sdFileListCache.values() if isinstance(x, dict)]
 
     def _selectSdFile(self, filename: str, check_already_open: bool = False) -> None:
         if filename.startswith("/"):

@@ -10,11 +10,14 @@ from .ftpsclient import IoTFTPSClient
 
 
 class BambuPrintPlugin(
-    octoprint.plugin.SettingsPlugin, octoprint.plugin.TemplatePlugin
+    octoprint.plugin.SettingsPlugin, octoprint.plugin.TemplatePlugin, octoprint.plugin.AssetPlugin
 ):
 
+
+    def get_assets(self):
+        return {'js': ["js/bambu_printer.js"]}
     def get_template_configs(self):
-        return [{"type": "settings", "custom_bindings": False}]
+        return [{"type": "settings", "custom_bindings": False}] #, {"type": "generic", "custom_bindings": True, "template": "bambu_printer.jinja2"}]
 
     def get_settings_defaults(self):
         return {"device_type": "X1C",
@@ -31,7 +34,9 @@ class BambuPrintPlugin(
                 "local_mqtt": True,
                 "region": "",
                 "email": "",
-                "auth_token": ""}
+                "auth_token": "",
+                "always_use_default_options": False
+                }
 
     def support_3mf_files(self):
         return {'machinecode': {'3mf': ["3mf"]}}
@@ -50,7 +55,7 @@ class BambuPrintPlugin(
                     elapsed = time.monotonic() - elapsed
                     sd_upload_succeeded(filename, filename, elapsed)
                     # remove local file after successful upload to Bambu
-                    self._file_manager.remove_file("local", filename)
+                    # self._file_manager.remove_file("local", filename)
                 else:
                     raise Exception("upload failed")
             except Exception as e:

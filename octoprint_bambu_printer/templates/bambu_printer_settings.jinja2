@@ -27,7 +27,7 @@
 		</div>
 	</div>
 	<div class="control-group">
-        <label class="control-label">{{ _('Print Options') }}</label>
+        <label class="control-label">{{ _('Default Print Options') }}</label>
         <div class="controls">
             <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.timelapse"> {{ _('Enable timelapse') }}</label>
             <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.bed_leveling"> {{ _('Enable bed leveling') }}</label>
@@ -37,4 +37,10 @@
             <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.use_ams"> {{ _('Use AMS') }}</label>
         </div>
     </div>
+	{#<div class="control-group">
+        <label class="control-label">{{ _('Always Use Default') }}</label>
+        <div class="controls">
+            <label class="checkbox"><input type="checkbox" data-bind="checked: settings.plugins.bambu_printer.always_use_default_options"> </label>
+        </div>
+    </div>#}
 </form>
