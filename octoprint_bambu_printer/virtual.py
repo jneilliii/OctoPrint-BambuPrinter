@@ -679,8 +679,8 @@ class BambuPrinter:
                 filename = entry[1:].replace("cache/", "")
             else:
                 filename = entry.replace("cache/", "")
-            filesize = ftp.ftps_session.size(entry)
-            date_str = ftp.ftps_session.sendcmd(f"MDTM {entry}").replace("213 ", "")
+            filesize = ftp.ftps_session.size(f"cache/{filename}")
+            date_str = ftp.ftps_session.sendcmd(f"MDTM cache/{filename}").replace("213 ", "")
             filedate = datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S").replace(tzinfo=datetime.timezone.utc).timestamp()
             dosname = get_dos_filename(filename, existing_filenames=list(result.keys())).lower()
             data = {
