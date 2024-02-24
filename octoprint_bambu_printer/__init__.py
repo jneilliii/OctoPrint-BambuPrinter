@@ -5,13 +5,15 @@ import threading
 import time
 
 import octoprint.plugin
+from octoprint.events import Events
 
 from .ftpsclient import IoTFTPSClient
 
 
-class BambuPrintPlugin(
-    octoprint.plugin.SettingsPlugin, octoprint.plugin.TemplatePlugin, octoprint.plugin.AssetPlugin
-):
+class BambuPrintPlugin(octoprint.plugin.SettingsPlugin,
+                       octoprint.plugin.TemplatePlugin,
+                       octoprint.plugin.AssetPlugin,
+                       octoprint.plugin.EventHandlerPlugin):
 
 
     def get_assets(self):
@@ -38,6 +40,9 @@ class BambuPrintPlugin(
                 "always_use_default_options": False
                 }
 
+    def on_event(self, event, payload):
+        if event == Events.TRANSFER_DONE:
+            self._printer.commands("M20 L T", force=True)
     def support_3mf_files(self):
         return {'machinecode': {'3mf': ["3mf"]}}
 
