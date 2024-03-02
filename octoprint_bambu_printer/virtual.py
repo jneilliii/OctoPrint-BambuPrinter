@@ -160,6 +160,8 @@ class BambuPrinter:
             fans = device_data.fans.__dict__
             speed = device_data.speed.__dict__
 
+            # self._logger.debug(device_data)
+
             self.temp[0] = temperatures.get("nozzle_temp", 0.0)
             self.targetTemp[0] = temperatures.get("target_nozzle_temp", 0.0)
             self.bedTemp = temperatures.get("bed_temp", 0.0)
@@ -711,8 +713,12 @@ class BambuPrinter:
 
         file = self._getSdFileData(filename)
         if file is None:
-            self._send(f"{filename} open failed")
-            return
+            self._listSd(incl_long=True, incl_timestamp=True)
+            self._sendOk()
+            file = self._getSdFileData(filename)
+            if file is None:
+                self._send(f"{filename} open failed")
+                return
 
         if self._selectedSdFile == file["path"] and check_already_open:
             return
