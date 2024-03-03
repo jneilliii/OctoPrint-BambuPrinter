@@ -215,7 +215,7 @@ class BambuPrinter:
         self.bambu = BambuClient(device_type=self._settings.get(["device_type"]),
                                  serial=self._settings.get(["serial"]),
                                  host=self._settings.get(["host"]),
-                                 username=self._settings.get(["username"]),
+                                 username="bblp" if self._settings.get_boolean(["local_mqtt"]) else self._settings.get(["username"]),
                                  access_code=self._settings.get(["access_code"]),
                                  local_mqtt=self._settings.get_boolean(["local_mqtt"]),
                                  region=self._settings.get(["region"]),

@@ -13,13 +13,14 @@ from .ftpsclient import IoTFTPSClient
 class BambuPrintPlugin(octoprint.plugin.SettingsPlugin,
                        octoprint.plugin.TemplatePlugin,
                        octoprint.plugin.AssetPlugin,
-                       octoprint.plugin.EventHandlerPlugin):
+                       octoprint.plugin.EventHandlerPlugin,
+                       octoprint.plugin.SimpleApiPlugin):
 
 
     def get_assets(self):
         return {'js': ["js/bambu_printer.js"]}
     def get_template_configs(self):
-        return [{"type": "settings", "custom_bindings": False}] #, {"type": "generic", "custom_bindings": True, "template": "bambu_printer.jinja2"}]
+        return [{"type": "settings", "custom_bindings": True}] #, {"type": "generic", "custom_bindings": True, "template": "bambu_printer.jinja2"}]
 
     def get_settings_defaults(self):
         return {"device_type": "X1C",
@@ -40,6 +41,20 @@ class BambuPrintPlugin(octoprint.plugin.SettingsPlugin,
                 "always_use_default_options": False
                 }
 
+    def is_api_adminonly(self):
+        return True
+
+    def get_api_commands(self):
+        return {"register": ["email", "password", "region", "auth_token"]}
+    def on_api_command(self, command, data):
+        import flask
+        if command == "register":
+            if "email" in data and "password" in data and "region" in data and "auth_token" in data:
+                self._logger.info(f"Registering user {data['email']}")
+                from pybambu import BambuCloud
+                bambu_cloud = BambuCloud(data["region"], data["email"], data["password"], data["auth_token"])
+                bambu_cloud.login(data["region"], data["email"], data["password"])
+                return flask.jsonify({"auth_token": bambu_cloud.auth_token, "username": bambu_cloud.username})
     def on_event(self, event, payload):
         if event == Events.TRANSFER_DONE:
             self._printer.commands("M20 L T", force=True)
@@ -73,6 +88,9 @@ class BambuPrintPlugin(octoprint.plugin.SettingsPlugin,
         thread.start()
 
         return filename
+
+    def get_template_vars(self):
+        return {"plugin_version": self._plugin_version}
 
     def virtual_printer_factory(self, comm_instance, port, baudrate, read_timeout):
         if not port == "BAMBU":

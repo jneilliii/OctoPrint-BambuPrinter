@@ -5,12 +5,27 @@
  * License: AGPLv3
  */
 
-$(function() {
+$(function () {
     function Bambu_printerViewModel(parameters) {
         var self = this;
 
         self.settingsViewModel = parameters[0];
         self.filesViewModel = parameters[1];
+
+        self.getAuthToken = function (data) {
+            self.settingsViewModel.settings.plugins.bambu_printer.auth_token("");
+            OctoPrint.simpleApiCommand("bambu_printer", "register", {
+                "email": self.settingsViewModel.settings.plugins.bambu_printer.email(),
+                "password": $("#bambu_cloud_password").val(),
+                "region": self.settingsViewModel.settings.plugins.bambu_printer.region(),
+                "auth_token": self.settingsViewModel.settings.plugins.bambu_printer.auth_token()
+            })
+                .done(function (response) {
+                    console.log(response);
+                    self.settingsViewModel.settings.plugins.bambu_printer.auth_token(response.auth_token);
+                    self.settingsViewModel.settings.plugins.bambu_printer.username(response.username);
+                });
+        };
 
         /*$('#files div.upload-buttons > span.fileinput-button:first, #files div.folder-button').remove();
         $('#files div.upload-buttons > span.fileinput-button:first').removeClass('span6').addClass('input-block-level');
@@ -70,8 +85,8 @@ $(function() {
     OCTOPRINT_VIEWMODELS.push({
         construct: Bambu_printerViewModel,
         // ViewModels your plugin depends on, e.g. loginStateViewModel, settingsViewModel, ...
-        dependencies: [ "settingsViewModel", "filesViewModel" ],
+        dependencies: ["settingsViewModel", "filesViewModel"],
         // Elements to bind to, e.g. #settings_plugin_bambu_printer, #tab_plugin_bambu_printer, ...
-        elements: [ "#bambu_printer_print_options" ]
+        elements: ["#bambu_printer_print_options", "#settings_plugin_bambu_printer"]
     });
 });
