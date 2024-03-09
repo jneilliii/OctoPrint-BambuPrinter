@@ -211,7 +211,12 @@ class BambuPrinter:
         ):
             asyncio.run(self._create_connection_async())
 
+    def on_disconnect(self, on_disconnect):
+        self._logger.debug(f"on disconnect called")
+        return on_disconnect
+
     async def _create_connection_async(self):
+        self._logger.debug(f"connecting via local mqtt: {self._settings.get_boolean(['local_mqtt'])}")
         self.bambu = BambuClient(device_type=self._settings.get(["device_type"]),
                                  serial=self._settings.get(["serial"]),
                                  host=self._settings.get(["host"]),
@@ -222,13 +227,10 @@ class BambuPrinter:
                                  email=self._settings.get(["email"]),
                                  auth_token=self._settings.get(["auth_token"])
                                  )
-
+        self.bambu.on_disconnect = self.on_disconnect(self.bambu.on_disconnect)
         self.bambu.connect(callback=self.new_update)
         self._logger.info(f"bambu connection status: {self.bambu.connected}")
         self._sendOk()
-        # while True:
-        #     await asyncio.sleep(self.tick_rate)
-        #     self._processTemperatureQuery()
 
     def __str__(self):
         return "BAMBU(read_timeout={read_timeout},write_timeout={write_timeout},options={options})".format(
@@ -698,6 +700,7 @@ class BambuPrinter:
         return result
 
     def _getSdFileData(self, filename: str) -> Optional[Dict[str, Any]]:
+        self._logger.debug(f"_getSdFileData: {filename}")
         data = self._sdFileListCache.get(filename.lower())
         if isinstance(data, str):
             data = self._sdFileListCache.get(data.lower())
@@ -705,9 +708,11 @@ class BambuPrinter:
 
     def _getSdFiles(self) -> List[Dict[str, Any]]:
         self._sdFileListCache = self._mappedSdList()
+        self._logger.debug(f"_getSdFiles return: {self._sdFileListCache}")
         return [x for x in self._sdFileListCache.values() if isinstance(x, dict)]
 
     def _selectSdFile(self, filename: str, check_already_open: bool = False) -> None:
+        self._logger.debug(f"_selectSdFile: {filename}, check_already_open={check_already_open}")
         if filename.startswith("/"):
             filename = filename[1:]
 
@@ -729,6 +734,7 @@ class BambuPrinter:
         self._send("File selected")
 
     def _startSdPrint(self, from_printer: bool = False) -> None:
+        self._logger.debug(f"_startSdPrint: from_printer={from_printer}")
         if self._selectedSdFile is not None:
             if self._sdPrinter is None:
                 self._sdPrinting = True
