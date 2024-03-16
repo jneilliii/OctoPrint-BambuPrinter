@@ -196,7 +196,7 @@ class BambuPrinter:
                     self._send("// action:paused")
                     self._sendPaused()
 
-            if ( print_job.get("gcode_state") == "FINISH" or print_job.get("gcode_state") == "FAILED" ):
+            if print_job.get("gcode_state") == "FINISH" or print_job.get("gcode_state") == "FAILED":
                 if self._sdPrintStarting is False:
                     self._sdPrinting = False
                 if self._sdPrintingSemaphore.is_set():
@@ -826,7 +826,13 @@ class BambuPrinter:
                 print_command = {"print": {"sequence_id": 0,
                                            "command": "project_file",
                                            "param": "Metadata/plate_1.gcode",
+                                           "md5": "",
+                                           "profile_id": "0",
+                                           "project_id": "0",
+                                           "subtask_id": "0",
+                                           "task_id": "0",
                                            "subtask_name": f"{self._selectedSdFile}",
+                                           "file": f"{self._selectedSdFile}",
                                            "url": f"file:///mnt/sdcard/{self._selectedSdFile}" if self._settings.get_boolean(["device_type"]) in ["X1", "X1C"] else f"file:///sdcard/{self._selectedSdFile}",
                                            "timelapse": self._settings.get_boolean(["timelapse"]),
                                            "bed_leveling": self._settings.get_boolean(["bed_leveling"]),
