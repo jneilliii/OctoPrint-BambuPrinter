@@ -4,6 +4,7 @@ __license__ = "GNU Affero General Public License http://www.gnu.org/licenses/agp
 
 import collections
 import datetime
+import math
 import os
 import queue
 import re
@@ -162,6 +163,7 @@ class BambuPrinter:
 
             # self._logger.debug(device_data)
 
+            self.lastTempAt = time.monotonic()
             self.temp[0] = temperatures.get("nozzle_temp", 0.0)
             self.targetTemp[0] = temperatures.get("target_nozzle_temp", 0.0)
             self.bedTemp = temperatures.get("bed_temp", 0.0)
@@ -181,6 +183,8 @@ class BambuPrinter:
                             filename = f"{filename.lower()}.3mf"
                         elif self._sdFileListCache.get(f"{filename.lower()}.gcode.3mf"):
                             filename = f"{filename.lower()}.gcode.3mf"
+                        else:
+                            self._logger.debug(f"No 3mf file found for {print_job}")
 
                     self._selectSdFile(filename)
                     self._startSdPrint(from_printer=True)
@@ -215,6 +219,10 @@ class BambuPrinter:
         self._logger.debug(f"on disconnect called")
         return on_disconnect
 
+    def on_connect(self, on_connect):
+        self._logger.debug(f"on connect called")
+        return on_connect
+
     async def _create_connection_async(self):
         self._logger.debug(f"connecting via local mqtt: {self._settings.get_boolean(['local_mqtt'])}")
         self.bambu = BambuClient(device_type=self._settings.get(["device_type"]),
@@ -228,6 +236,7 @@ class BambuPrinter:
                                  auth_token=self._settings.get(["auth_token"])
                                  )
         self.bambu.on_disconnect = self.on_disconnect(self.bambu.on_disconnect)
+        self.bambu.on_connect = self.on_connect(self.bambu.on_connect)
         self.bambu.connect(callback=self.new_update)
         self._logger.info(f"bambu connection status: {self.bambu.connected}")
         self._sendOk()
@@ -556,8 +565,7 @@ class BambuPrinter:
 
     # noinspection PyUnusedLocal
     def _gcode_M105(self, data: str) -> bool:
-        self._processTemperatureQuery()
-        return True
+        return self._processTemperatureQuery()
 
     # noinspection PyUnusedLocal
     def _gcode_M115(self, data: str) -> bool:
@@ -588,6 +596,26 @@ class BambuPrinter:
                 self._send(f"echo:{text}")
             else:
                 self._send(text)
+        return True
+
+    # noinspection PyUnusedLocal
+    def _gcode_M220(self, data: str) -> bool:
+        if self.bambu.connected:
+            gcode_command = commands.SEND_GCODE_TEMPLATE
+            percent = int(data[1:])
+
+            if percent is None or percent < 1 or percent > 166:
+                return True
+
+            speed_fraction = 100 / percent
+            acceleration = math.exp((speed_fraction - 1.0191) / -0.814)
+            feed_rate = (2.1645 * (acceleration ** 3) - 5.3247 * (acceleration ** 2) + 4.342 * acceleration - 0.181)
+            speed_level = 1.539 * (acceleration ** 2) - 0.7032 * acceleration + 4.0834
+            speed_command = f"M204.2 K${acceleration:.2f} \nM220 K${feed_rate:.2f} \nM73.2 R${speed_fraction:.2f} \nM1002 set_gcode_claim_speed_level ${speed_level:.0f}\n"
+
+            gcode_command['print']['param'] = speed_command
+            if self.bambu.publish(gcode_command):
+                self._logger.info(f"{percent}% speed adjustment command sent successfully")
         return True
 
     # noinspection PyUnusedLocal
@@ -704,6 +732,7 @@ class BambuPrinter:
         data = self._sdFileListCache.get(filename.lower())
         if isinstance(data, str):
             data = self._sdFileListCache.get(data.lower())
+        self._logger.debug(f"_getSdFileData: {data}")
         return data
 
     def _getSdFiles(self) -> List[Dict[str, Any]]:
@@ -794,10 +823,14 @@ class BambuPrinter:
         output += " @:64\n"
         return output
 
-    def _processTemperatureQuery(self):
+    def _processTemperatureQuery(self) -> bool:
         # includeOk = not self._okBeforeCommandOutput
-        output = self._generateTemperatureOutput()
-        self._send(output)
+        if self.bambu.connected:
+            output = self._generateTemperatureOutput()
+            self._send(output)
+            return True
+        else:
+            return False
 
     def _writeSdFile(self, filename: str) -> None:
         self._send(f"Writing to file: {filename}")
