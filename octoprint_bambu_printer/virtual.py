@@ -170,7 +170,7 @@ class BambuPrinter:
             self.bedTargetTemp = temperatures.get("target_bed_temp", 0.0)
             self.chamberTemp = temperatures.get("chamber_temp", 0.0)
 
-            if print_job.get("gcode_state") == "RUNNING" or print_job.get("gcode_state") == "PREPARE":
+            if print_job.get("gcode_state") == "RUNNING":
                 if not self._sdPrintingSemaphore.is_set():
                     self._sdPrintingSemaphore.set()
                 if self._sdPrintingPausedSemaphore.is_set():
