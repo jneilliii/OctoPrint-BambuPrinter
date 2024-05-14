@@ -183,6 +183,8 @@ class BambuPrinter:
                             filename = f"{filename.lower()}.3mf"
                         elif self._sdFileListCache.get(f"{filename.lower()}.gcode.3mf"):
                             filename = f"{filename.lower()}.gcode.3mf"
+                        elif filename.startswith("cache/"):
+                            filename = filename[6:]
                         else:
                             self._logger.debug(f"No 3mf file found for {print_job}")
 
