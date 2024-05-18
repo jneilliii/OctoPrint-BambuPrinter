@@ -11,6 +11,9 @@ $(function () {
 
         self.settingsViewModel = parameters[0];
         self.filesViewModel = parameters[1];
+        self.loginStateViewModel = parameters[2];
+        self.accessViewModel = parameters[3];
+        self.timelapseViewModel = parameters[4];
 
         self.getAuthToken = function (data) {
             self.settingsViewModel.settings.plugins.bambu_printer.auth_token("");
@@ -25,6 +28,59 @@ $(function () {
                     self.settingsViewModel.settings.plugins.bambu_printer.auth_token(response.auth_token);
                     self.settingsViewModel.settings.plugins.bambu_printer.username(response.username);
                 });
+        };
+
+                // initialize list helper
+        self.listHelper = new ItemListHelper(
+            "timelapseFiles",
+            {
+                name: function (a, b) {
+                    // sorts ascending
+                    if (a["name"].toLocaleLowerCase() < b["name"].toLocaleLowerCase())
+                        return -1;
+                    if (a["name"].toLocaleLowerCase() > b["name"].toLocaleLowerCase())
+                        return 1;
+                    return 0;
+                },
+                date: function (a, b) {
+                    // sorts descending
+                    if (a["date"] > b["date"]) return -1;
+                    if (a["date"] < b["date"]) return 1;
+                    return 0;
+                },
+                size: function (a, b) {
+                    // sorts descending
+                    if (a["bytes"] > b["bytes"]) return -1;
+                    if (a["bytes"] < b["bytes"]) return 1;
+                    return 0;
+                }
+            },
+            {},
+            "name",
+            [],
+            [],
+            CONFIG_TIMELAPSEFILESPERPAGE
+        );
+
+        self.onDataUpdaterPluginMessage = function(plugin, data) {
+            if (plugin != "bambu_printer") {
+                return;
+            }
+
+            if (data.files !== undefined) {
+                console.log(data.files);
+                self.listHelper.updateItems(data.files);
+                self.listHelper.resetPage();
+            }
+        };
+
+        self.onBeforeBinding = function () {
+            $('#bambu_timelapse').appendTo("#timelapse");
+        };
+
+        self.showTimelapseThumbnail = function(data) {
+            $("#bambu_printer_timelapse_thumbnail").attr("src", data.thumbnail);
+            $("#bambu_printer_timelapse_preview").modal('show');
         };
 
         /*$('#files div.upload-buttons > span.fileinput-button:first, #files div.folder-button').remove();
@@ -85,8 +141,8 @@ $(function () {
     OCTOPRINT_VIEWMODELS.push({
         construct: Bambu_printerViewModel,
         // ViewModels your plugin depends on, e.g. loginStateViewModel, settingsViewModel, ...
-        dependencies: ["settingsViewModel", "filesViewModel"],
+        dependencies: ["settingsViewModel", "filesViewModel", "loginStateViewModel", "accessViewModel", "timelapseViewModel"],
         // Elements to bind to, e.g. #settings_plugin_bambu_printer, #tab_plugin_bambu_printer, ...
-        elements: ["#bambu_printer_print_options", "#settings_plugin_bambu_printer"]
+        elements: ["#bambu_printer_print_options", "#settings_plugin_bambu_printer", "#bambu_timelapse"]
     });
 });

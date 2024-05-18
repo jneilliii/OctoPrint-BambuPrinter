@@ -1,12 +1,19 @@
 # coding=utf-8
 from __future__ import absolute_import
 
+import os
 import threading
 import time
+import flask
+import datetime
 
 import octoprint.plugin
 from octoprint.events import Events
-
+from octoprint.util import get_formatted_size, get_formatted_datetime, is_hidden_path
+from octoprint.server.util.flask import no_firstrun_access
+from octoprint.server.util.tornado import LargeResponseHandler, UrlProxyHandler, path_validation_factory
+from octoprint.access.permissions import Permissions
+from urllib.parse import quote as urlquote
 from .ftpsclient import IoTFTPSClient
 
 
@@ -14,13 +21,15 @@ class BambuPrintPlugin(octoprint.plugin.SettingsPlugin,
                        octoprint.plugin.TemplatePlugin,
                        octoprint.plugin.AssetPlugin,
                        octoprint.plugin.EventHandlerPlugin,
-                       octoprint.plugin.SimpleApiPlugin):
+                       octoprint.plugin.SimpleApiPlugin,
+                       octoprint.plugin.BlueprintPlugin):
 
 
     def get_assets(self):
         return {'js': ["js/bambu_printer.js"]}
     def get_template_configs(self):
-        return [{"type": "settings", "custom_bindings": True}] #, {"type": "generic", "custom_bindings": True, "template": "bambu_printer.jinja2"}]
+        return [{"type": "settings", "custom_bindings": True},
+                {"type": "generic", "custom_bindings": True, "template": "bambu_timelapse.jinja2"}] #, {"type": "generic", "custom_bindings": True, "template": "bambu_printer.jinja2"}]
 
     def get_settings_defaults(self):
         return {"device_type": "X1C",
@@ -47,7 +56,6 @@ class BambuPrintPlugin(octoprint.plugin.SettingsPlugin,
     def get_api_commands(self):
         return {"register": ["email", "password", "region", "auth_token"]}
     def on_api_command(self, command, data):
-        import flask
         if command == "register":
             if "email" in data and "password" in data and "region" in data and "auth_token" in data:
                 self._logger.info(f"Registering user {data['email']}")
@@ -129,6 +137,100 @@ class BambuPrintPlugin(octoprint.plugin.SettingsPlugin,
         else:
             return []
 
+    def get_timelapse_file_list(self):
+        if flask.request.path.startswith('/api/timelapse'):
+            def process():
+                host = self._settings.get(["host"])
+                access_code = self._settings.get(["access_code"])
+                return_file_list = []
+
+                try:
+                    ftp = IoTFTPSClient(f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True)
+                    timelapse_file_list = ftp.list_files("timelapse/", ".mp4") or []
+
+                    for entry in timelapse_file_list:
+                        if entry.startswith("/"):
+                            filename = entry[1:].replace("timelapse/", "")
+                        else:
+                            filename = entry.replace("timelapse/", "")
+
+                        filesize = ftp.ftps_session.size(f"timelapse/{filename}")
+                        date_str = ftp.ftps_session.sendcmd(f"MDTM timelapse/{filename}").replace("213 ", "")
+                        filedate = datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S").replace(tzinfo=datetime.timezone.utc).timestamp()
+
+                        return_file_list.append(
+                            {
+                                "bytes": filesize,
+                                "date": get_formatted_datetime(datetime.datetime.fromtimestamp(filedate)),
+                                "name": filename,
+                                "size": get_formatted_size(filesize),
+                                "thumbnail": "/plugin/bambu_printer/thumbnail/" + filename.replace(".mp4", ".jpg"),
+                                "timestamp": filedate,
+                                "url": f"/plugin/bambu_printer/timelapse/{filename}"
+                            })
+
+                    self._plugin_manager.send_plugin_message(self._identifier, {'files': return_file_list})
+
+                except Exception as e:
+                    self._logger.debug(f"Error getting timelapse files: {e}")
+
+            thread = threading.Thread(target=process)
+            thread.daemon = True
+            thread.start()
+
+
+    def _hook_octoprint_server_api_before_request(self, *args, **kwargs):
+        return [self.get_timelapse_file_list]
+
+    @octoprint.plugin.BlueprintPlugin.route("/timelapse/<filename>", methods=["GET"])
+    @octoprint.server.util.flask.restricted_access
+    @no_firstrun_access
+    @Permissions.TIMELAPSE_DOWNLOAD.require(403)
+    def downloadTimelapse(self, filename):
+        dest_filename = os.path.join(self.get_plugin_data_folder(), filename)
+        host = self._settings.get(["host"])
+        access_code = self._settings.get(["access_code"])
+
+        if not os.path.exists(dest_filename):
+            ftp = IoTFTPSClient(f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True)
+            download_result = ftp.download_file(
+                source=f"timelapse/{filename}",
+                dest=dest_filename,
+            )
+
+        return flask.redirect("/plugin/bambu_printer/download/timelapse/" + urlquote(filename), code=302)
+
+    @octoprint.plugin.BlueprintPlugin.route("/thumbnail/<filename>", methods=["GET"])
+    @octoprint.server.util.flask.restricted_access
+    @no_firstrun_access
+    @Permissions.TIMELAPSE_DOWNLOAD.require(403)
+    def downloadThumbnail(self, filename):
+        dest_filename = os.path.join(self.get_plugin_data_folder(), filename)
+        host = self._settings.get(["host"])
+        access_code = self._settings.get(["access_code"])
+
+        if not os.path.exists(dest_filename):
+            ftp = IoTFTPSClient(f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True)
+            download_result = ftp.download_file(
+                source=f"timelapse/thumbnail/{filename}",
+                dest=dest_filename,
+            )
+
+        return flask.redirect("/plugin/bambu_printer/download/thumbnail/" + urlquote(filename), code=302)
+
+    def is_blueprint_csrf_protected(self):
+        return True
+
+    def route_hook(self, server_routes, *args, **kwargs):
+        return [
+            (r"/download/timelapse/(.*)", LargeResponseHandler,
+             {'path': self.get_plugin_data_folder(), 'as_attachment': True, 'path_validation': path_validation_factory(
+                 lambda path: not is_hidden_path(path), status_code=404)}),
+            (r"/download/thumbnail/(.*)", LargeResponseHandler,
+             {'path': self.get_plugin_data_folder(), 'as_attachment': True, 'path_validation': path_validation_factory(
+                 lambda path: not is_hidden_path(path), status_code=404)})
+        ]
+
     def get_update_information(self):
         return {'bambu_printer': {'displayName': "Bambu Printer",
                                   'displayVersion': self._plugin_version,
@@ -164,4 +266,6 @@ def __plugin_load__():
         "octoprint.filemanager.extension_tree": __plugin_implementation__.support_3mf_files,
         "octoprint.printer.sdcardupload": __plugin_implementation__.upload_to_sd,
         "octoprint.plugin.softwareupdate.check_config": __plugin_implementation__.get_update_information,
+        "octoprint.server.api.before_request": __plugin_implementation__._hook_octoprint_server_api_before_request,
+        "octoprint.server.http.routes": __plugin_implementation__.route_hook
     }

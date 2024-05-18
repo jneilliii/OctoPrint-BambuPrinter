@@ -1,0 +1,71 @@
+<div class="row-fluid" id="bambu_timelapse">
+    <h1>{{ _('Bambu Timelapses') }}</h1>
+
+    <div class="pull-right">
+        <div class="btn-group">
+            <button class="btn btn-small dropdown-toggle" data-toggle="dropdown"><i class="fas fa-wrench"></i> <span class="caret"></span></button>
+            <ul class="dropdown-menu dropdown-menu-right">
+                <li><a href="javascript:void(0)" data-bind="click: function() { listHelper.changeSorting('name'); }"><i class="fas fa-check" data-bind="style: {visibility: listHelper.currentSorting() == 'name' ? 'visible' : 'hidden'}"></i> {{ _('Sort by name') }} ({{ _('ascending') }})</a></li>
+                <li><a href="javascript:void(0)" data-bind="click: function() { listHelper.changeSorting('date'); }"><i class="fas fa-check" data-bind="style: {visibility: listHelper.currentSorting() == 'date' ? 'visible' : 'hidden'}"></i> {{ _('Sort by date') }} ({{ _('descending') }})</a></li>
+                <li><a href="javascript:void(0)" data-bind="click: function() { listHelper.changeSorting('size'); }"><i class="fas fa-check" data-bind="style: {visibility: listHelper.currentSorting() == 'size' ? 'visible' : 'hidden'}"></i> {{ _('Sort by file size') }} ({{ _('descending') }})</a></li>
+            </ul>
+        </div>
+    </div>
+    <table class="table table-hover table-condensed table-hover" id="bambu_timelapse_files">
+        <thead>
+        <tr>
+            <th class="timelapse_files_thumb"></th>
+            <th class="timelapse_files_details">{{ _('Details') }}</th>
+            <th class="timelapse_files_action">{{ _('Action') }}</th>
+        </tr>
+        </thead>
+        <tbody data-bind="foreach: listHelper.paginatedItems">
+        <tr data-bind="attr: {title: name}">
+            <td class="timelapse_files_thumb">
+                <div class="thumb" data-bind="css: { letterbox: $data.thumbnail }">
+                    <!-- ko if: $data.thumbnail -->
+                    <img data-bind="attr:{src: thumbnail}" loading="lazy" style="aspect-ratio: 3 / 2;"/>
+                    <!-- /ko -->
+                    <a href="javascript:void(0)" data-bind="css: {disabled: !$root.timelapseViewModel.isTimelapseViewable($data)}, click: $root.showTimelapseThumbnail"></a>
+                </div>
+            </td>
+            <td class="timelapse_files_details">
+                <p class="name" data-bind="text: name"></p>
+                <p class="detail">{{ _('Recorded:') }} <span data-bind="text: formatTimeAgo(timestamp)"/></p>
+                <p class="detail">{{ _('Size:') }} <span data-bind="text: size"/></p>
+            </td>
+            <td class="timelapse_files_action">
+                <div class="btn-group action-buttons">
+                    <a href="javascript:void(0)" class="btn btn-mini" data-bind="css: {disabled: !$root.loginStateViewModel.hasPermissionKo($root.accessViewModel.permissions.TIMELAPSE_DOWNLOAD)()}, attr: { href: ($root.loginStateViewModel.hasPermission($root.accessViewModel.permissions.TIMELAPSE_DOWNLOAD)) ? $data.url : 'javascript:void(0)' }"><i class="fas fa-download"></i></a>
+                </div>
+            </td>
+        </tr>
+        </tbody>
+    </table>
+    <div class="pagination pagination-mini pagination-centered">
+        <ul>
+            <li data-bind="css: {disabled: listHelper.currentPage() === 0}"><a href="javascript:void(0)" data-bind="click: listHelper.prevPage">«</a></li>
+        </ul>
+        <ul data-bind="foreach: listHelper.pages">
+            <li data-bind="css: { active: $data.number === $root.listHelper.currentPage(), disabled: $data.number === -1 }"><a href="javascript:void(0)" data-bind="text: $data.text, click: function() { $root.listHelper.changePage($data.number); }"></a></li>
+        </ul>
+        <ul>
+            <li data-bind="css: {disabled: listHelper.currentPage() === listHelper.lastPage()}"><a href="javascript:void(0)" data-bind="click: listHelper.nextPage">»</a></li>
+        </ul>
+    </div>
+</div>
+
+<div id="bambu_printer_timelapse_preview" class="modal hide fade">
+	<div class="modal-header">
+		<a href="#" class="close" data-dismiss="modal" aria-hidden="true">&times;</a>
+		<h3>{{ _('Timelapse Thumbnail') }}</h3>
+	</div>
+    <div class="modal-body">
+        <div class="row-fluid">
+            <img id="bambu_printer_timelapse_thumbnail" src="" class="row-fluid" style="aspect-ratio: 3 / 2;"/>
+        </div>
+	</div>
+	<div class="modal-footer">
+		<a href="#" class="btn" data-dismiss="modal" aria-hidden="true">{{ _('Close') }}</a>
+	</div>
+</div>
