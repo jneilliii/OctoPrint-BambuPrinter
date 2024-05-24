@@ -146,7 +146,10 @@ class BambuPrintPlugin(octoprint.plugin.SettingsPlugin,
 
                 try:
                     ftp = IoTFTPSClient(f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True)
-                    timelapse_file_list = ftp.list_files("timelapse/", ".mp4") or []
+                    if self._settings.get(["device_type"]) in ["X1", "X1C"]:
+                        timelapse_file_list = ftp.list_files("timelapse/", ".mp4") or []
+                    else:
+                        timelapse_file_list = ftp.list_files("timelapse/", ".avi") or []
 
                     for entry in timelapse_file_list:
                         if entry.startswith("/"):
