@@ -167,7 +167,7 @@ class BambuPrintPlugin(octoprint.plugin.SettingsPlugin,
                                 "date": get_formatted_datetime(datetime.datetime.fromtimestamp(filedate)),
                                 "name": filename,
                                 "size": get_formatted_size(filesize),
-                                "thumbnail": "/plugin/bambu_printer/thumbnail/" + filename.replace(".mp4", ".jpg"),
+                                "thumbnail": "/plugin/bambu_printer/thumbnail/" + filename.replace(".mp4", ".jpg").replace(".avi", ".jpg"),
                                 "timestamp": filedate,
                                 "url": f"/plugin/bambu_printer/timelapse/{filename}"
                             })
