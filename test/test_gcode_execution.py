@@ -86,7 +86,7 @@ def files_info_ftp():
 def ftps_session_mock(files_info_ftp):
     with unittest.mock.patch(
         "octoprint_bambu_printer.printer.ftpsclient.ftpsclient.IoTFTPSClient"
-    ) as ftps_client:
+    ) as ftps_client_mock:
         ftps_session = MagicMock()
         ftps_session.size.side_effect = DictGetter(
             {file: info[0] for file, info in files_info_ftp.items()}
@@ -96,13 +96,13 @@ def ftps_session_mock(files_info_ftp):
         )
 
         all_files = list(files_info_ftp.keys())
-        ftps_client.list_files.side_effect = DictGetter(
+        ftps_client_mock.list_files.side_effect = DictGetter(
             {
                 ("", ".3mf"): all_files,
                 ("cache/", ".3mf"): [f"cache/{file}" for file in all_files],
             }
         )
-        ftps_client.ftps_session = ftps_session
+        ftps_client_mock.ftps_session = ftps_session
         yield
 
 
@@ -130,7 +130,7 @@ def test_initial_state(printer: BambuVirtualPrinter):
 
 def test_list_sd_card(printer: BambuVirtualPrinter):
     printer.write(b"M20\n")  # GCode for listing SD card
-    time.sleep(0.1)
+    printer.flush()
     result = printer.readlines()
     assert result == ""  # Replace with the actual expected result
 

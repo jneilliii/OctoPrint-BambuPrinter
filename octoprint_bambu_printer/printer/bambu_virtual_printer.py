@@ -273,7 +273,6 @@ class BambuVirtualPrinter:
 
     def readlines(self) -> list[bytes]:
         result = []
-        self._serial_io.wait_for_input()
         next_line = self._serial_io.readline()
         while next_line != b"":
             result.append(next_line)
@@ -281,10 +280,13 @@ class BambuVirtualPrinter:
         return result
 
     def sendIO(self, line: str):
-        self.sendIO(line)
+        self._serial_io.send(line)
 
     def sendOk(self):
         self._serial_io.sendOk()
+
+    def flush(self):
+        self._serial_io.flush()
 
     ##~~ command implementations
 
@@ -392,12 +394,16 @@ class BambuVirtualPrinter:
                 self._log.info(f"{percent}% speed adjustment command sent successfully")
         return True
 
-    def _process_gcode_serial_command(self, gcode_letter: str, gcode: str, data: bytes):
-        self._log.debug(f"processing gcode command {gcode_letter} {gcode} {data}")
+    def _process_gcode_serial_command(
+        self, gcode_letter: str, gcode: str, full_command: str
+    ):
+        self._log.debug(
+            f"processing gcode command letter = {gcode_letter} | gcode = {gcode} | full = {full_command}"
+        )
         if gcode_letter in self.gcode_executor:
-            handled = self.gcode_executor.execute(self, gcode_letter, data)
+            handled = self.gcode_executor.execute(self, gcode_letter, full_command)
         else:
-            handled = self.gcode_executor.execute(self, gcode, data)
+            handled = self.gcode_executor.execute(self, gcode, full_command)
         if handled:
             self._serial_io.sendOk()
             return
@@ -405,7 +411,7 @@ class BambuVirtualPrinter:
         # post gcode to printer otherwise
         if self.bambu_client.connected:
             GCODE_COMMAND = commands.SEND_GCODE_TEMPLATE
-            GCODE_COMMAND["print"]["param"] = data + "\n"
+            GCODE_COMMAND["print"]["param"] = full_command + "\n"
             if self.bambu_client.publish(GCODE_COMMAND):
                 self._log.info("command sent successfully")
                 self._serial_io.sendOk()
@@ -416,7 +422,7 @@ class BambuVirtualPrinter:
         if self.bambu_client.connected:
             self.bambu_client.disconnect()
         self.sendIO("echo:EMERGENCY SHUTDOWN DETECTED. KILLED.")
-        self._serial_io.stop()
+        self._serial_io.close()
         return True
 
     @gcode_executor.register_no_data("M20")
@@ -481,6 +487,7 @@ class BambuVirtualPrinter:
         self.sendIO(f"Writing to file: {filename}")
 
     def _finishSdFile(self):
+        # FIXME: maybe remove or move to remote SD card
         try:
             self._writingToSdHandle.close()
         except Exception:
@@ -515,4 +522,14 @@ class BambuVirtualPrinter:
     def close(self):
         if self.bambu_client.connected:
             self.bambu_client.disconnect()
-        self._serial_io.stop()
+        self._serial_io.close()
+
+    def _showPrompt(self, text, choices):
+        self._hidePrompt()
+        self.sendIO(f"//action:prompt_begin {text}")
+        for choice in choices:
+            self.sendIO(f"//action:prompt_button {choice}")
+        self.sendIO("//action:prompt_show")
+
+    def _hidePrompt(self):
+        self.sendIO("//action:prompt_end")

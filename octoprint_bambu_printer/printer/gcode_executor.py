@@ -1,6 +1,7 @@
 import itertools
 import logging
 from inspect import signature
+import traceback
 
 
 GCODE_DOCUMENTATION = {
@@ -311,7 +312,8 @@ class GCodeExecutor:
                 self._log.debug(f"ignoring {gcode_info} command.")
                 return True
         except Exception as e:
-            self._log.error(f"Error {gcode_info}: {str(e)}")
+            self._log.error(f"Error during gcode {gcode_info}")
+            self._log.error(e, exc_info=True)
             return False
 
     def _gcode_with_info(self, gcode):

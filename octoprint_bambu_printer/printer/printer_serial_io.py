@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import queue
 import re
@@ -16,28 +18,18 @@ class PrinterSerialIO(threading.Thread):
 
     def __init__(
         self,
-        handle_command_callback: Callable[[str, str, bytes], None],
+        handle_command_callback: Callable[[str, str, str], None],
         settings,
         serial_log_handler=None,
         read_timeout=5.0,
         write_timeout=10.0,
     ) -> None:
         super().__init__(
-            name="octoprint.plugins.bambu_printer.wait_thread", daemon=True
+            name="octoprint.plugins.bambu_printer.serial_io_thread", daemon=True
         )
         self._handle_command_callback = handle_command_callback
         self._settings = settings
-        self._serial_log = logging.getLogger(
-            "octoprint.plugins.bambu_printer.BambuPrinter.serial"
-        )
-        self._serial_log.setLevel(logging.CRITICAL)
-        self._serial_log.propagate = False
-
-        if serial_log_handler is not None:
-            self._serial_log.addHandler(serial_log_handler)
-            self._serial_log.setLevel(logging.INFO)
-
-        self._serial_log.debug("-" * 78)
+        self._log = self._init_logger(serial_log_handler)
 
         self._read_timeout = read_timeout
         self._write_timeout = write_timeout
@@ -48,65 +40,106 @@ class PrinterSerialIO(threading.Thread):
 
         self._rx_buffer_size = 64
         self._incoming_lock = threading.RLock()
-        self._input_queue_empty = threading.Event()
-        self._input_queue_empty.set()
-        self._input_processing_finished = threading.Event()
-        self._input_processing_finished.set()
 
-        self.incoming = CharCountingQueue(self._rx_buffer_size, name="RxBuffer")
-        self.outgoing = queue.Queue()
+        self.input_bytes = CharCountingQueue(self._rx_buffer_size, name="RxBuffer")
+        self.output_bytes = queue.Queue()
+
+    def _init_logger(self, log_handler):
+        log = logging.getLogger("octoprint.plugins.bambu_printer.BambuPrinter.serial")
+        if log_handler is not None:
+            log.addHandler(log_handler)
+        log.debug("-" * 78)
+        return log
 
     @property
     def incoming_lock(self):
         return self._incoming_lock
 
     def run(self) -> None:
-        data = None
+        buffer = b""
 
-        buf = b""
-        while self.incoming is not None and self._running:
+        while self._running:
             try:
-                data = self.incoming.get(timeout=0.01)
+                data = self.input_bytes.get(block=True, timeout=0.01)
                 data = to_bytes(data, encoding="ascii", errors="replace")
-                self.incoming.task_done()
-                self._input_queue_empty.clear()
+                self.input_bytes.task_done()
+
+                line, buffer = self._read_next_line_buffered(data, buffer)
+                while line is not None:
+                    self._received_lines += 1
+                    self._process_input_gcode_line(line)
+                    line, buffer = self._read_next_line_buffered(data, buffer)
             except queue.Empty:
-                self._input_queue_empty.set()
-                continue
-            except Exception:
-                if self.incoming is None:
-                    # just got closed
-                    break
-
-            if data is not None:
-                buf += data
-                nl = buf.find(b"\n") + 1
-                if nl > 0:
-                    data = buf[:nl]
-                    buf = buf[nl:]
-                else:
-                    continue
-
-            if data is None:
                 continue
 
-            self._received_lines += 1
+        self._log.debug("Closing IO read loop")
+
+    def _read_next_line_buffered(self, additional: bytes, buffer: bytes):
+        buffer += additional
+        new_line_pos = buffer.find(b"\n") + 1
+        if new_line_pos > 0:
+            additional = buffer[:new_line_pos]
+            buffer = buffer[new_line_pos:]
+
+        return additional, buffer
+
+    def close(self):
+        self.flush()
+        self._running = False
+        self.join()
+
+    def flush(self):
+        with self.input_bytes.all_tasks_done:
+            self.input_bytes.all_tasks_done.wait()
+
+    def write(self, data: bytes) -> int:
+        data = to_bytes(data, errors="replace")
+        u_data = to_unicode(data, errors="replace")
+
+        with self._incoming_lock:
+            if self.is_closed():
+                return 0
 
             try:
-                self._process_input_line(data)
-            finally:
-                self._input_processing_finished.set()
+                written = self.input_bytes.put(
+                    data, timeout=self._write_timeout, partial=True
+                )
+                self._log.debug(f"<<< {u_data}")
+                return written
+            except queue.Full:
+                self._log.error(
+                    "Incoming queue is full, raising SerialTimeoutException"
+                )
+                raise SerialTimeoutException()
 
-        self._serial_log.debug("Closing down read loop")
+    def readline(self) -> bytes:
+        try:
+            # fetch a line from the queue, wait no longer than timeout
+            line = to_unicode(
+                self.output_bytes.get(timeout=self._read_timeout), errors="replace"
+            )
+            self._log.debug(f">>> {line.strip()}")
+            self.output_bytes.task_done()
+            return to_bytes(line)
+        except queue.Empty:
+            # queue empty? return empty line
+            return b""
 
-    def stop(self):
-        self._running = False
+    def send(self, line: str) -> None:
+        if self.output_bytes is not None:
+            self.output_bytes.put(line)
 
-    def wait_for_input(self):
-        self._input_queue_empty.wait()
-        self._input_processing_finished.wait()
+    def sendOk(self):
+        self.send("ok")
 
-    def _process_input_line(self, data: bytes):
+    def reset(self):
+        self._clearQueue(self.input_bytes)
+        self._clearQueue(self.output_bytes)
+
+    def is_closed(self):
+        return not self._running
+
+    def _process_input_gcode_line(self, data: bytes):
         if b"*" in data:
             checksum = int(data[data.rfind(b"*") + 1 :])
             data = data[: data.rfind(b"*")]
@@ -148,75 +181,13 @@ class PrinterSerialIO(threading.Thread):
             gcode = command_match.group(0)
             gcode_letter = command_match.group(1)
 
-            self._handle_command_callback(gcode_letter, gcode, data)
-
-    def _showPrompt(self, text, choices):
-        self._hidePrompt()
-        self.send(f"//action:prompt_begin {text}")
-        for choice in choices:
-            self.send(f"//action:prompt_button {choice}")
-        self.send("//action:prompt_show")
-
-    def _hidePrompt(self):
-        self.send("//action:prompt_end")
-
-    def write(self, data: bytes) -> int:
-        data = to_bytes(data, errors="replace")
-        u_data = to_unicode(data, errors="replace")
-
-        with self._incoming_lock:
-            if self.is_closed():
-                return 0
-
-            try:
-                written = self.incoming.put(
-                    data, timeout=self._write_timeout, partial=True
-                )
-                self._serial_log.debug(f"<<< {u_data}")
-                return written
-            except queue.Full:
-                self._serial_log.error(
-                    "Incoming queue is full, raising SerialTimeoutException"
-                )
-                raise SerialTimeoutException()
-
-    def readline(self) -> bytes:
-        assert self.outgoing is not None
-        try:
-            # fetch a line from the queue, wait no longer than timeout
-            line = to_unicode(
-                self.outgoing.get(timeout=self._read_timeout), errors="replace"
-            )
-            self._serial_log.debug(f">>> {line.strip()}")
-            self.outgoing.task_done()
-            return to_bytes(line)
-        except queue.Empty:
-            # queue empty? return empty line
-            return b""
-
-    def send(self, line: str) -> None:
-        if self.outgoing is not None:
-            self.outgoing.put(line)
-
-    def sendOk(self):
-        self.send("ok")
-
-    def reset(self):
-        if self.incoming is not None:
-            self._clearQueue(self.incoming)
-        if self.outgoing is not None:
-            self._clearQueue(self.outgoing)
-
-    def close(self):
-        self.stop()
-        self.incoming = None
-        self.outgoing = None
-
-    def is_closed(self):
-        return self.incoming is None or self.outgoing is None
+            self._handle_command_callback(gcode_letter, gcode, command)
 
     def _triggerResend(
-        self, expected: int = None, actual: int = None, checksum: int = None
+        self,
+        expected: int | None = None,
+        actual: int | None = None,
+        checksum: int | None = None,
     ) -> None:
         with self._incoming_lock:
             if expected is None:
