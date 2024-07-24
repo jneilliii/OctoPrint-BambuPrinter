@@ -3,27 +3,24 @@ __license__ = "GNU Affero General Public License http://www.gnu.org/licenses/agp
 
 
 import collections
-import datetime
 import math
 import os
 import queue
 import re
 import threading
 import time
-from typing import Any, Dict, List, Optional
 import asyncio
+from octoprint_bambu_printer.remote_sd_card_file_list import RemoteSDCardFileList
 from pybambu import BambuClient, commands
 import logging
 import logging.handlers
 
 from serial import SerialTimeoutException
-from octoprint.util import RepeatedTimer, to_bytes, to_unicode, get_dos_filename
-from octoprint.util.files import unix_timestamp_to_m20_timestamp
+from octoprint.util import RepeatedTimer, to_bytes, to_unicode
 
 from octoprint_bambu_printer.gcode_executor import GCodeExecutor
 
 from .char_counting_queue import CharCountingQueue
-from .ftpsclient import IoTFTPSClient
 
 
 # noinspection PyBroadException
@@ -77,10 +74,7 @@ class BambuVirtualPrinter:
         self._sdPrintStarting = False
         self._sdPrintingSemaphore = threading.Event()
         self._sdPrintingPausedSemaphore = threading.Event()
-        self._sdFileListCache = {}
-        self._selectedSdFile = None
-        self._selectedSdFileSize = 0
-        self._selectedSdFilePos = 0
+        self._sdCardFileSystem = RemoteSDCardFileList(settings)
 
         self._busy = None
         self._busy_loop = None
@@ -125,14 +119,6 @@ class BambuVirtualPrinter:
         )
         readThread.start()
 
-        # bufferThread = threading.Thread(
-        #     target=self._processBuffer,
-        #     name="octoprint.plugins.bambu_printer.buffer_thread",
-        #     daemon=True
-        # )
-        # bufferThread.start()
-
-        # Move this into M110 command response?
         connectionThread = threading.Thread(
             target=self._create_connection,
             name="octoprint.plugins.bambu_printer.connection_thread",
@@ -184,17 +170,14 @@ class BambuVirtualPrinter:
                 self._sdPrintStarting = False
                 if not self._sdPrinting:
                     filename: str = print_job.get("subtask_name")
-                    if not self._sdFileListCache.get(filename.lower()):
-                        if self._sdFileListCache.get(f"{filename.lower()}.3mf"):
-                            filename = f"{filename.lower()}.3mf"
-                        elif self._sdFileListCache.get(f"{filename.lower()}.gcode.3mf"):
-                            filename = f"{filename.lower()}.gcode.3mf"
-                        elif filename.startswith("cache/"):
-                            filename = filename[6:]
-                        else:
-                            self._logger.debug(f"No 3mf file found for {print_job}")
+                    project_file = self._sdCardFileSystem.search_by_stem(
+                        filename, [".3mf", ".gcode.3mf"]
+                    )
+                    if project_file is None:
+                        self._logger.debug(f"No 3mf file found for {print_job}")
 
-                    self._selectSdFile(filename)
+                    if self._sdCardFileSystem.select_file(filename):
+                        self._sendOk()
                     self._startSdPrint(from_printer=True)
 
                 # fuzzy math here to get print percentage to match BambuStudio
@@ -428,7 +411,7 @@ class BambuVirtualPrinter:
 
                 self.current_line += 1
             elif self._settings.get_boolean(["forceChecksum"]):
-                self._send(self._error("checksum_missing"))
+                self._send(self._format_error("checksum_missing"))
                 continue
 
             # track N = N + 1
@@ -452,18 +435,18 @@ class BambuVirtualPrinter:
 
             data += b"\n"
 
-            data = to_unicode(data, encoding="ascii", errors="replace").strip()
+            command = to_unicode(data, encoding="ascii", errors="replace").strip()
 
             # actual command handling
-            command_match = BambuVirtualPrinter.command_regex.match(data)
+            command_match = BambuVirtualPrinter.command_regex.match(command)
             if command_match is not None:
-                command = command_match.group(0)
-                letter = command_match.group(1)
+                gcode = command_match.group(0)
+                gcode_letter = command_match.group(1)
 
-                if letter in self.gcode_executor:
-                    handled = self.run_gcode_handler(letter, data)
+                if gcode_letter in self.gcode_executor:
+                    handled = self.run_gcode_handler(gcode_letter, data)
                 else:
-                    handled = self.run_gcode_handler(command, data)
+                    handled = self.run_gcode_handler(gcode, data)
                 if handled:
                     self._sendOk()
                     continue
@@ -626,11 +609,11 @@ class BambuVirtualPrinter:
 
             if actual is None:
                 if checksum:
-                    self._send(self._error("checksum_mismatch"))
+                    self._send(self._format_error("checksum_mismatch"))
                 else:
-                    self._send(self._error("checksum_missing"))
+                    self._send(self._format_error("checksum_missing"))
             else:
-                self._send(self._error("lineno_mismatch", expected, actual))
+                self._send(self._format_error("lineno_mismatch", expected, actual))
 
             def request_resend():
                 self._send("Resend:%d" % expected)
@@ -641,113 +624,12 @@ class BambuVirtualPrinter:
 
     @gcode_executor.register_no_data("M20")
     def _listSd(self):
-        line = '{dosname} {size} {timestamp} "{name}"'
-
         self._send("Begin file list")
-        for item in map(lambda x: line.format(**x), self._getSdFiles()):
+        for item in map(
+            lambda f: f.get_log_info(), self._sdCardFileSystem.get_all_files()
+        ):
             self._send(item)
         self._send("End file list")
-
-    def _mappedSdList(self) -> Dict[str, Dict[str, Any]]:
-        result = {}
-        host = self._settings.get(["host"])
-        access_code = self._settings.get(["access_code"])
-
-        ftp = IoTFTPSClient(f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True)
-        filelist = ftp.list_files("", ".3mf") or []
-
-        for entry in filelist:
-            if entry.startswith("/"):
-                filename = entry[1:]
-            else:
-                filename = entry
-            filesize = ftp.ftps_session.size(entry)
-            date_str = ftp.ftps_session.sendcmd(f"MDTM {entry}").replace("213 ", "")
-            filedate = (
-                datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S")
-                .replace(tzinfo=datetime.timezone.utc)
-                .timestamp()
-            )
-            dosname = get_dos_filename(
-                filename, existing_filenames=list(result.keys())
-            ).lower()
-            data = {
-                "dosname": dosname,
-                "name": filename,
-                "path": filename,
-                "size": filesize,
-                "timestamp": unix_timestamp_to_m20_timestamp(int(filedate)),
-            }
-            result[dosname.lower()] = filename.lower()
-            result[filename.lower()] = data
-
-        filelistcache = ftp.list_files("cache/", ".3mf") or []
-
-        for entry in filelistcache:
-            if entry.startswith("/"):
-                filename = entry[1:].replace("cache/", "")
-            else:
-                filename = entry.replace("cache/", "")
-            filesize = ftp.ftps_session.size(f"cache/{filename}")
-            date_str = ftp.ftps_session.sendcmd(f"MDTM cache/{filename}").replace(
-                "213 ", ""
-            )
-            filedate = (
-                datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S")
-                .replace(tzinfo=datetime.timezone.utc)
-                .timestamp()
-            )
-            dosname = get_dos_filename(
-                filename, existing_filenames=list(result.keys())
-            ).lower()
-            data = {
-                "dosname": dosname,
-                "name": filename,
-                "path": "cache/" + filename,
-                "size": filesize,
-                "timestamp": unix_timestamp_to_m20_timestamp(int(filedate)),
-            }
-            result[dosname.lower()] = filename.lower()
-            result[filename.lower()] = data
-
-        return result
-
-    def _getSdFileData(self, filename: str) -> Optional[Dict[str, Any]]:
-        self._logger.debug(f"_getSdFileData: {filename}")
-        data = self._sdFileListCache.get(filename.lower())
-        if isinstance(data, str):
-            data = self._sdFileListCache.get(data.lower())
-        self._logger.debug(f"_getSdFileData: {data}")
-        return data
-
-    def _getSdFiles(self) -> List[Dict[str, Any]]:
-        self._sdFileListCache = self._mappedSdList()
-        self._logger.debug(f"_getSdFiles return: {self._sdFileListCache}")
-        return [x for x in self._sdFileListCache.values() if isinstance(x, dict)]
-
-    def _selectSdFile(self, filename: str, check_already_open: bool = False) -> None:
-        self._logger.debug(
-            f"_selectSdFile: {filename}, check_already_open={check_already_open}"
-        )
-        if filename.startswith("/"):
-            filename = filename[1:]
-
-        file = self._getSdFileData(filename)
-        if file is None:
-            self._listSd()
-            self._sendOk()
-            file = self._getSdFileData(filename)
-            if file is None:
-                self._send(f"{filename} open failed")
-                return
-
-        if self._selectedSdFile == file["path"] and check_already_open:
-            return
-
-        self._selectedSdFile = file["path"]
-        self._selectedSdFileSize = file["size"]
-        self._send(f"File opened: {file['name']}  Size: {self._selectedSdFileSize}")
-        self._send("File selected")
 
     @gcode_executor.register_no_data("M24")
     def _startSdPrint(self, from_printer: bool = False) -> bool:
@@ -908,25 +790,6 @@ class BambuVirtualPrinter:
             self._sdPrintStarting = False
             self._sdPrinter = None
 
-    def _deleteSdFile(self, filename: str) -> None:
-        host = self._settings.get(["host"])
-        access_code = self._settings.get(["access_code"])
-
-        if filename.startswith("/"):
-            filename = filename[1:]
-        file = self._getSdFileData(filename)
-        if file is not None:
-            ftp = IoTFTPSClient(
-                f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True
-            )
-            try:
-                if ftp.delete_file(file["path"]):
-                    self._logger.debug(f"{filename} deleted")
-                else:
-                    raise Exception("delete failed")
-            except Exception as e:
-                self._logger.debug(f"Error deleting file {filename}")
-
     def _setBusy(self, reason="processing"):
         if not self._sendBusy:
             return
@@ -1027,5 +890,5 @@ class BambuVirtualPrinter:
         if self.outgoing is not None:
             self.outgoing.put(line)
 
-    def _error(self, error: str, *args, **kwargs) -> str:
+    def _format_error(self, error: str, *args, **kwargs) -> str:
         return f"Error: {self._errors.get(error).format(*args, **kwargs)}"
