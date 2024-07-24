@@ -25,7 +25,7 @@ class FileInfo:
         return self.path.name.lower()
 
     def get_log_info(self):
-        return f'{self.dosname} {self.size} {self.timestamp} "{self.file_name}"'
+        return f'{self.dosname} {self.size} {self.timestamp} "{self.path.as_posix()}"'
 
     def to_dict(self):
         return asdict(self)
@@ -49,10 +49,12 @@ class RemoteSDCardFileList:
         return self._selected_file_info is not None
 
     def _get_ftp_file_info(
-        self, ftp: IoTFTPSClient, ftp_path, file_path: Path, existing_files: list[str]
+        self, ftp: IoTFTPSClient, file_path: Path, existing_files: list[str]
     ):
-        file_size = ftp.ftps_session.size(ftp_path)
-        date_str = ftp.ftps_session.sendcmd(f"MDTM {ftp_path}").replace("213 ", "")
+        file_size = ftp.ftps_session.size(file_path.as_posix())
+        date_str = ftp.ftps_session.sendcmd(f"MDTM {file_path.as_posix()}").replace(
+            "213 ", ""
+        )
         filedate = (
             datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S")
             .replace(tzinfo=datetime.timezone.utc)
@@ -71,8 +73,7 @@ class RemoteSDCardFileList:
         self, ftp, files: list[str], existing_files: list[str]
     ) -> Iterator[FileInfo]:
         for entry in files:
-            ftp_path = Path(entry)
-            file_info = self._get_ftp_file_info(ftp, entry, ftp_path, existing_files)
+            file_info = self._get_ftp_file_info(ftp, Path(entry), existing_files)
 
             yield file_info
             existing_files.append(file_info.file_name)
@@ -82,7 +83,12 @@ class RemoteSDCardFileList:
 
         file_list = []
         file_list.extend(ftp.list_files("", ".3mf") or [])
-        file_list.extend(ftp.list_files("cache/", ".3mf") or [])
+        file_list.extend(
+            [
+                (Path("cache/") / f).as_posix()
+                for f in (ftp.list_files("cache/", ".3mf") or [])
+            ]
+        )
 
         existing_files = []
         return list(self._scan_ftp_file_list(ftp, file_list, existing_files))
@@ -93,15 +99,15 @@ class RemoteSDCardFileList:
         ftp = IoTFTPSClient(f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True)
         return ftp
 
-    def _get_file_data(self, file_path: str) -> FileInfo | None:
-        self._logger.debug(f"_getSdFileData: {file_path}")
+    def _get_cached_file_data(self, file_name: str) -> FileInfo | None:
+        self._logger.debug(f"get data for path: {file_name}")
 
         # replace if name is an alias
-        file_name = Path(file_path).name.lower()
+        file_name = Path(file_name).name.lower()
         file_name = self._file_alias_cache.get(file_name, file_name)
 
         data = self._file_data_cache.get(file_name, None)
-        self._logger.debug(f"_getSdFileData: {data}")
+        self._logger.debug(f"get file data: {data}")
         return data
 
     def get_all_files(self):
@@ -117,7 +123,7 @@ class RemoteSDCardFileList:
         self._file_data_cache = {info.file_name: info for info in file_info_list}
 
     def get_data_by_suffix(self, file_name: str, allowed_suffixes: list[str]):
-        file_data = self._get_file_data(file_name)
+        file_data = self._get_cached_file_data(file_name)
         if file_data is None:
             return None
         file_path = file_data.path
@@ -130,7 +136,7 @@ class RemoteSDCardFileList:
             f"_selectSdFile: {file_path}, check_already_open={check_already_open}"
         )
         file_name = Path(file_path).name
-        file_info = self._get_file_data(file_name)
+        file_info = self._get_cached_file_data(file_name)
         if file_info is None:
             self._logger.error(f"{file_name} open failed")
             return False
@@ -152,7 +158,7 @@ class RemoteSDCardFileList:
         host = self._settings.get(["host"])
         access_code = self._settings.get(["access_code"])
 
-        file_info = self._get_file_data(file_path)
+        file_info = self._get_cached_file_data(file_path)
         if file_info is not None:
             ftp = IoTFTPSClient(
                 f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True
