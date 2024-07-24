@@ -286,8 +286,7 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M23")
     def _select_sd_file(self, data: str) -> bool:
         filename = data.split(maxsplit=1)[1].strip()
-        self.file_system.select_file(filename)
-        return True
+        return self.file_system.select_file(filename)
 
     @gcode_executor.register("M26")
     def _set_sd_position(self, data: str) -> bool:

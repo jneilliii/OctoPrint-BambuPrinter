@@ -135,7 +135,7 @@ def printer(output_test_folder, settings, profile_manager, log_test, ftps_sessio
         profile_manager,
         data_folder=output_test_folder,
         serial_log_handler=log_test,
-        read_timeout=5.0,
+        read_timeout=0.01,
         faked_baudrate=115200,
     )
     serial_obj._bambu_client = MagicMock()
@@ -161,17 +161,30 @@ def test_list_sd_card(printer: BambuVirtualPrinter):
 def test_cannot_start_print_without_file(printer: BambuVirtualPrinter):
     printer.write(b"M24\n")
     printer.flush()
-
     result = printer.readlines()
     assert result[0] == b"ok"
     assert isinstance(printer.current_state, IdleState)
 
 
+def test_non_existing_file_not_ok(printer: BambuVirtualPrinter):
+    printer.write(b"M23 non_existing.3mf\n")
+    printer.flush()
+    result = printer.readlines()
+    assert result[0] == b"ok"
+    assert printer.file_system.selected_file is None
+
+
 def test_print_started_with_selected_file(printer: BambuVirtualPrinter):
     assert printer.file_system.selected_file is None
 
+    printer.write(b"M20\n")
+    printer.flush()
+    printer.readlines()
+
     printer.write(b"M23 print.3mf\n")
     printer.flush()
+    result = printer.readlines()
+    assert result[0] == b"ok"
 
     assert printer.file_system.selected_file is not None
     assert printer.file_system.selected_file.file_name == "print.3mf"

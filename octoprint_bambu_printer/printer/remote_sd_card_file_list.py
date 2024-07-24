@@ -95,10 +95,12 @@ class RemoteSDCardFileList:
 
     def _get_file_data(self, file_path: str) -> FileInfo | None:
         self._logger.debug(f"_getSdFileData: {file_path}")
+
+        # replace if name is an alias
         file_name = Path(file_path).name.lower()
-        full_file_name = self._file_alias_cache.get(file_name, None)
-        if full_file_name is not None:
-            data = self._file_data_cache.get(file_name, None)
+        file_name = self._file_alias_cache.get(file_name, file_name)
+
+        data = self._file_data_cache.get(file_name, None)
         self._logger.debug(f"_getSdFileData: {data}")
         return data
 
@@ -133,10 +135,8 @@ class RemoteSDCardFileList:
         file_name = Path(file_path).name
         file_info = self._get_file_data(file_name)
         if file_info is None:
-            file_info = self._get_file_data(file_name)
-            if file_info is None:
-                self._logger.error(f"{file_name} open failed")
-                return False
+            self._logger.error(f"{file_name} open failed")
+            return False
 
         if (
             self._selected_file_info is not None

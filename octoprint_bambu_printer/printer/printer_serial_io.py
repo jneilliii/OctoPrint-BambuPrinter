@@ -76,6 +76,8 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
                 continue
             except Exception as e:
                 self._error_detected = e
+                self.input_bytes.task_done()
+                self.input_bytes.clear()
                 break
 
         self._log.debug("Closing IO read loop")

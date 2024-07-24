@@ -313,8 +313,7 @@ class GCodeExecutor:
                 return True
         except Exception as e:
             self._log.error(f"Error during gcode {gcode_info}")
-            self._log.error(e, exc_info=True)
-            return False
+            raise
 
     def _gcode_with_info(self, gcode):
         return f"{gcode} ({GCODE_DOCUMENTATION.get(gcode, 'Info not specified')})"
