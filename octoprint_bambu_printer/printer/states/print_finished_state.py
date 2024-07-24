@@ -12,8 +12,5 @@ class PrintFinishedState(APrinterState):
     def _finishSdPrint(self):
         if self._printer.is_running:
             self._printer.sendIO("Done printing file")
-            self._selectedSdFilePos = 0
-            self._selectedSdFileSize = 0
-            self._sdPrinting = False
-            self._sdPrintStarting = False
-            self._sdPrinter = None
+
+        self._printer.change_state(self._printer._state_idle)

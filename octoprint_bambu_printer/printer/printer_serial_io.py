@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BufferedIOBase
 import logging
 import queue
 import re
@@ -13,7 +14,7 @@ from serial import SerialTimeoutException
 from .char_counting_queue import CharCountingQueue
 
 
-class PrinterSerialIO(threading.Thread):
+class PrinterSerialIO(threading.Thread, BufferedIOBase):
     command_regex = re.compile(r"^([GM])(\d+)")
 
     def __init__(
@@ -90,8 +91,7 @@ class PrinterSerialIO(threading.Thread):
         self.join()
 
     def flush(self):
-        with self.input_bytes.all_tasks_done:
-            self.input_bytes.all_tasks_done.wait()
+        self.input_bytes.join()
 
     def write(self, data: bytes) -> int:
         data = to_bytes(data, errors="replace")
@@ -125,6 +125,14 @@ class PrinterSerialIO(threading.Thread):
         except queue.Empty:
             # queue empty? return empty line
             return b""
+
+    def readlines(self):
+        result = []
+        next_line = self.readline()
+        while next_line != b"":
+            result.append(next_line)
+            next_line = self.readline()
+        return result
 
     def send(self, line: str) -> None:
         if self.output_bytes is not None:

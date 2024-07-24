@@ -133,7 +133,8 @@ def printer(output_test_folder, settings, profile_manager, log_test, ftps_sessio
         faked_baudrate=115200,
     )
     serial_obj._bambu_client = MagicMock()
-    return serial_obj
+    yield serial_obj
+    serial_obj.close()
 
 
 def test_initial_state(printer: BambuVirtualPrinter):
@@ -142,7 +143,7 @@ def test_initial_state(printer: BambuVirtualPrinter):
 
 def test_list_sd_card(printer: BambuVirtualPrinter):
     printer.write(b"M20\n")  # GCode for listing SD card
-    printer.close()
+    printer.flush()
     result = printer.readlines()
     assert result == ""  # Replace with the actual expected result
 

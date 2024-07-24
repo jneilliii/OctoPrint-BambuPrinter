@@ -272,12 +272,7 @@ class BambuVirtualPrinter:
         return self._serial_io.readline()
 
     def readlines(self) -> list[bytes]:
-        result = []
-        next_line = self._serial_io.readline()
-        while next_line != b"":
-            result.append(next_line)
-            next_line = self._serial_io.readline()
-        return result
+        return self._serial_io.readlines()
 
     def sendIO(self, line: str):
         self._serial_io.send(line)
@@ -504,24 +499,10 @@ class BambuVirtualPrinter:
         self._writingToSdFile = None
         self.sendIO("Done saving file")
 
-    def _setMainThreadBusy(self, reason="processing"):
-        def loop():
-            while self._busy_reason is not None:
-                self.sendIO(f"echo:busy {self._busy_reason}")
-                time.sleep(self._busy_interval)
-            self._serial_io.sendOk()
-
-        self._busy_reason = reason
-        self._busy_loop = threading.Thread(target=loop)
-        self._busy_loop.daemon = True
-        self._busy_loop.start()
-
-    def _setMainThreadIdle(self):
-        self._busy_reason = None
-
     def close(self):
         if self.bambu_client.connected:
             self.bambu_client.disconnect()
+        self.change_state(self._state_idle)
         self._serial_io.close()
 
     def _showPrompt(self, text, choices):
