@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
+import time
 import unittest
 from unittest.mock import MagicMock
 import unittest.mock
@@ -50,6 +51,7 @@ def settings(output_test_folder):
             "access_code": "12345",
         }
     )
+    _settings.get_boolean.side_effect = DictGetter({"forceChecksum": False})
 
     log_file_path = output_test_folder / "log.txt"
     log_file_path.touch()
@@ -128,13 +130,13 @@ def test_initial_state(printer: BambuVirtualPrinter):
 
 def test_list_sd_card(printer: BambuVirtualPrinter):
     printer.write(b"M20\n")  # GCode for listing SD card
-    result = printer.readline()
+    time.sleep(0.1)
+    result = printer.readlines()
     assert result == ""  # Replace with the actual expected result
 
 
 def test_start_print(printer: BambuVirtualPrinter):
-    gcode = b"G28\nG1 X10 Y10\n"
-    printer.write(gcode)
+    printer.write(b"M\n")
     result = printer.readline()
     assert isinstance(printer.current_state, PrintingState)
 

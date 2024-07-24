@@ -67,13 +67,13 @@ class BambuVirtualPrinter:
         self._state_finished = PrintFinishedState(self)
         self._current_state = self._state_idle
         self._serial_io = PrinterSerialIO(
-            self._process_gcode_serial_command,
-            serial_log_handler,
+            handle_command_callback=self._process_gcode_serial_command,
+            settings=settings,
+            serial_log_handler=serial_log_handler,
             read_timeout=read_timeout,
             write_timeout=10.0,
         )
 
-        self.tick_rate = 2.0
         self._telemetry = BambuPrinterTelemetry()
         self._telemetry.hasChamber = printer_profile_manager.get_current().get(
             "heatedChamber"
@@ -153,7 +153,6 @@ class BambuVirtualPrinter:
 
         if print_job.gcode_state == "RUNNING":
             self.change_state(self._state_printing)
-            self._state_printing.update_print_job_info()
         if print_job.gcode_state == "PAUSE":
             self.change_state(self._state_paused)
         if print_job.gcode_state == "FINISH" or print_job.gcode_state == "FAILED":
@@ -228,17 +227,6 @@ class BambuVirtualPrinter:
     def _reset(self):
         with self._serial_io.incoming_lock:
             self.lastN = 0
-
-            self._debug_awol = False
-            self._debug_sleep = 0
-            # self._sleepAfterNext.clear()
-            # self._sleepAfter.clear()
-
-            self._dont_answer = False
-            self._broken_klipper_connection = False
-
-            self._debug_drop_connection = False
-
             self._running = False
 
             if self._sdstatus_reporter is not None:
@@ -249,7 +237,6 @@ class BambuVirtualPrinter:
                 for item in self._settings.get(["resetLines"]):
                     self.sendIO(item + "\n")
 
-            self._locked = self._settings.get_boolean(["locked"])
             self._serial_io.reset()
 
     @property
@@ -284,6 +271,15 @@ class BambuVirtualPrinter:
     def readline(self) -> bytes:
         return self._serial_io.readline()
 
+    def readlines(self) -> list[bytes]:
+        result = []
+        self._serial_io.wait_for_input()
+        next_line = self._serial_io.readline()
+        while next_line != b"":
+            result.append(next_line)
+            next_line = self._serial_io.readline()
+        return result
+
     def sendIO(self, line: str):
         self.sendIO(line)
 
@@ -291,26 +287,24 @@ class BambuVirtualPrinter:
         self._serial_io.sendOk()
 
     ##~~ command implementations
-    def run_gcode_handler(self, gcode, data):
-        self.gcode_executor.execute(self, gcode, data)
 
     @gcode_executor.register("M23")
-    def _gcode_M23(self, data: str) -> bool:
+    def _select_sd_file(self, data: str) -> bool:
         filename = data.split(maxsplit=1)[1].strip()
         self.file_system.select_file(filename)
         return True
 
     @gcode_executor.register("M26")
-    def _gcode_M26(self, data: str) -> bool:
+    def _set_sd_position(self, data: str) -> bool:
         if data == "M26 S0":
-            return self._cancelSdPrint()
+            return self._cancel_print()
         else:
             self._log.debug("ignoring M26 command.")
             self.sendIO("M26 disabled for Bambu")
             return True
 
     @gcode_executor.register("M27")
-    def _gcode_M27(self, data: str) -> bool:
+    def _report_sd_print_status(self, data: str) -> bool:
         matchS = re.search(r"S([0-9]+)", data)
         if matchS:
             interval = int(matchS.group(1))
@@ -329,18 +323,18 @@ class BambuVirtualPrinter:
         return True
 
     @gcode_executor.register("M30")
-    def _gcode_M30(self, data: str) -> bool:
+    def _delete_sd_file(self, data: str) -> bool:
         filename = data.split(None, 1)[1].strip()
         self.file_system.delete_file(filename)
         return True
 
     @gcode_executor.register("M105")
-    def _gcode_M105(self, data: str) -> bool:
+    def _report_temperatures(self, data: str) -> bool:
         return self._processTemperatureQuery()
 
     # noinspection PyUnusedLocal
     @gcode_executor.register("M115")
-    def _gcode_M115(self, data: str) -> bool:
+    def _report_firmware_info(self, data: str) -> bool:
         self.sendIO("Bambu Printer Integration")
         self.sendIO("Cap:EXTENDED_M20:1")
         self.sendIO("Cap:LFN_WRITE:1")
@@ -348,14 +342,14 @@ class BambuVirtualPrinter:
         return True
 
     @gcode_executor.register("M117")
-    def _gcode_M117(self, data: str) -> bool:
+    def _get_lcd_message(self, data: str) -> bool:
         # we'll just use this to echo a message, to allow playing around with pause triggers
         result = re.search(r"M117\s+(.*)", data).group(1)
         self.sendIO(f"echo:{result}")
-        return False
+        return True
 
     @gcode_executor.register("M118")
-    def _gcode_M118(self, data: str) -> bool:
+    def _serial_print(self, data: str) -> bool:
         match = re.search(r"M118 (?:(?P<parameter>A1|E1|Pn[012])\s)?(?P<text>.*)", data)
         if not match:
             self.sendIO("Unrecognized command parameters for M118")
@@ -374,7 +368,7 @@ class BambuVirtualPrinter:
 
     # noinspection PyUnusedLocal
     @gcode_executor.register("M220")
-    def _gcode_M220(self, data: str) -> bool:
+    def _set_feedrate_percent(self, data: str) -> bool:
         if self.bambu_client.connected:
             gcode_command = commands.SEND_GCODE_TEMPLATE
             percent = int(data[1:])
@@ -401,9 +395,9 @@ class BambuVirtualPrinter:
     def _process_gcode_serial_command(self, gcode_letter: str, gcode: str, data: bytes):
         self._log.debug(f"processing gcode command {gcode_letter} {gcode} {data}")
         if gcode_letter in self.gcode_executor:
-            handled = self.run_gcode_handler(gcode_letter, data)
+            handled = self.gcode_executor.execute(self, gcode_letter, data)
         else:
-            handled = self.run_gcode_handler(gcode, data)
+            handled = self.gcode_executor.execute(self, gcode, data)
         if handled:
             self._serial_io.sendOk()
             return
@@ -416,39 +410,37 @@ class BambuVirtualPrinter:
                 self._log.info("command sent successfully")
                 self._serial_io.sendOk()
 
-    ##~~ further helpers
-
     @gcode_executor.register_no_data("M112")
-    def _kill(self):
+    def _shutdown(self):
         self._running = True
         if self.bambu_client.connected:
             self.bambu_client.disconnect()
         self.sendIO("echo:EMERGENCY SHUTDOWN DETECTED. KILLED.")
         self._serial_io.stop()
+        return True
 
     @gcode_executor.register_no_data("M20")
-    def _listSd(self):
+    def _list_sd(self):
         self.sendIO("Begin file list")
         for item in map(lambda f: f.get_log_info(), self.file_system.get_all_files()):
             self.sendIO(item)
         self.sendIO("End file list")
+        return True
 
     @gcode_executor.register_no_data("M24")
-    def _startSdPrint(self, from_printer: bool = False) -> bool:
-        self._log.debug(f"_startSdPrint: from_printer={from_printer}")
-        self.change_state(self._state_printing)
+    def _start_print(self):
+        self._current_state.start_new_print()
+        return True
 
     @gcode_executor.register_no_data("M25")
-    def _pauseSdPrint(self):
-        if self.bambu_client.connected:
-            if self.bambu_client.publish(commands.PAUSE):
-                self._log.info("print paused")
-            else:
-                self._log.info("print pause failed")
+    def _pause_print(self):
+        self._current_state.pause_print()
+        return True
 
     @gcode_executor.register("M524")
-    def _cancelSdPrint(self) -> bool:
-        self._current_state.cancel()
+    def _cancel_print(self):
+        self._current_state.cancel_print()
+        return True
 
     def report_print_job_status(self):
         print_job = self.current_print_job

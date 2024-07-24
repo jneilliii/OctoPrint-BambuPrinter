@@ -300,15 +300,19 @@ class GCodeExecutor:
 
     def execute(self, printer, gcode, data):
         gcode_info = self._gcode_with_info(gcode)
-        if gcode in self.gcode_handlers:
-            self._log.debug(f"Executing {gcode_info}")
-            return self.gcode_handlers[gcode](printer, data)
-        elif gcode in self.gcode_handlers_no_data:
-            self._log.debug(f"Executing {gcode_info}")
-            return self.gcode_handlers_no_data[gcode](printer)
-        else:
-            self._log.debug(f"ignoring {gcode_info} command.")
-            return True
+        try:
+            if gcode in self.gcode_handlers:
+                self._log.debug(f"Executing {gcode_info}")
+                return self.gcode_handlers[gcode](printer, data)
+            elif gcode in self.gcode_handlers_no_data:
+                self._log.debug(f"Executing {gcode_info}")
+                return self.gcode_handlers_no_data[gcode](printer)
+            else:
+                self._log.debug(f"ignoring {gcode_info} command.")
+                return True
+        except Exception as e:
+            self._log.error(f"Error {gcode_info}: {str(e)}")
+            return False
 
     def _gcode_with_info(self, gcode):
         return f"{gcode} ({GCODE_DOCUMENTATION.get(gcode, 'Info not specified')})"

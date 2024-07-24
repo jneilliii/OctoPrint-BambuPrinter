@@ -48,26 +48,19 @@ class PrinterSerialIO(threading.Thread):
 
         self._rx_buffer_size = 64
         self._incoming_lock = threading.RLock()
+        self._input_queue_empty = threading.Event()
+        self._input_queue_empty.set()
+        self._input_processing_finished = threading.Event()
+        self._input_processing_finished.set()
 
         self.incoming = CharCountingQueue(self._rx_buffer_size, name="RxBuffer")
         self.outgoing = queue.Queue()
-        self.buffered = queue.Queue(maxsize=4)
-        self.command_queue = queue.Queue()
 
     @property
     def incoming_lock(self):
         return self._incoming_lock
 
     def run(self) -> None:
-        linenumber = 0
-        next_wait_timeout = 0
-
-        def recalculate_next_wait_timeout():
-            nonlocal next_wait_timeout
-            next_wait_timeout = time.monotonic() + self._wait_interval
-
-        recalculate_next_wait_timeout()
-
         data = None
 
         buf = b""
@@ -76,7 +69,9 @@ class PrinterSerialIO(threading.Thread):
                 data = self.incoming.get(timeout=0.01)
                 data = to_bytes(data, encoding="ascii", errors="replace")
                 self.incoming.task_done()
+                self._input_queue_empty.clear()
             except queue.Empty:
+                self._input_queue_empty.set()
                 continue
             except Exception:
                 if self.incoming is None:
@@ -92,61 +87,68 @@ class PrinterSerialIO(threading.Thread):
                 else:
                     continue
 
-            recalculate_next_wait_timeout()
-
             if data is None:
                 continue
 
             self._received_lines += 1
 
-            # strip checksum
-            if b"*" in data:
-                checksum = int(data[data.rfind(b"*") + 1 :])
-                data = data[: data.rfind(b"*")]
-                if not checksum == self._calculate_checksum(data):
-                    self._triggerResend(expected=self.current_line + 1)
-                    continue
+            try:
+                self._process_input_line(data)
+            finally:
+                self._input_processing_finished.set()
 
-                self.current_line += 1
-            elif self._settings.get_boolean(["forceChecksum"]):
-                self.send(self._format_error("checksum_missing"))
-                continue
-
-            # track N = N + 1
-            if data.startswith(b"N") and b"M110" in data:
-                linenumber = int(re.search(b"N([0-9]+)", data).group(1))
-                self.lastN = linenumber
-                self.current_line = linenumber
-                self.sendOk()
-                continue
-
-            elif data.startswith(b"N"):
-                linenumber = int(re.search(b"N([0-9]+)", data).group(1))
-                expected = self.lastN + 1
-                if linenumber != expected:
-                    self._triggerResend(actual=linenumber)
-                    continue
-                else:
-                    self.lastN = linenumber
-
-                data = data.split(None, 1)[1].strip()
-
-            data += b"\n"
-
-            command = to_unicode(data, encoding="ascii", errors="replace").strip()
-
-            # actual command handling
-            command_match = self.command_regex.match(command)
-            if command_match is not None:
-                gcode = command_match.group(0)
-                gcode_letter = command_match.group(1)
-
-                self._handle_command_callback(gcode_letter, gcode, data)
-
-            self._serial_log.debug("Closing down read loop")
+        self._serial_log.debug("Closing down read loop")
 
     def stop(self):
         self._running = False
+
+    def wait_for_input(self):
+        self._input_queue_empty.wait()
+        self._input_processing_finished.wait()
+
+    def _process_input_line(self, data: bytes):
+        if b"*" in data:
+            checksum = int(data[data.rfind(b"*") + 1 :])
+            data = data[: data.rfind(b"*")]
+            if not checksum == self._calculate_checksum(data):
+                self._triggerResend(expected=self.current_line + 1)
+                return
+
+            self.current_line += 1
+        elif self._settings.get_boolean(["forceChecksum"]):
+            self.send(self._format_error("checksum_missing"))
+            return
+
+        # track N = N + 1
+        linenumber = 0
+        if data.startswith(b"N") and b"M110" in data:
+            linenumber = int(re.search(b"N([0-9]+)", data).group(1))
+            self.lastN = linenumber
+            self.current_line = linenumber
+            self.sendOk()
+            return
+        elif data.startswith(b"N"):
+            linenumber = int(re.search(b"N([0-9]+)", data).group(1))
+            expected = self.lastN + 1
+            if linenumber != expected:
+                self._triggerResend(actual=linenumber)
+                return
+            else:
+                self.lastN = linenumber
+
+            data = data.split(None, 1)[1].strip()
+
+        data += b"\n"
+
+        command = to_unicode(data, encoding="ascii", errors="replace").strip()
+
+        # actual command handling
+        command_match = self.command_regex.match(command)
+        if command_match is not None:
+            gcode = command_match.group(0)
+            gcode_letter = command_match.group(1)
+
+            self._handle_command_callback(gcode_letter, gcode, data)
 
     def _showPrompt(self, text, choices):
         self._hidePrompt()
@@ -180,11 +182,11 @@ class PrinterSerialIO(threading.Thread):
 
     def readline(self) -> bytes:
         assert self.outgoing is not None
-        timeout = self._read_timeout
-
         try:
             # fetch a line from the queue, wait no longer than timeout
-            line = to_unicode(self.outgoing.get(timeout=timeout), errors="replace")
+            line = to_unicode(
+                self.outgoing.get(timeout=self._read_timeout), errors="replace"
+            )
             self._serial_log.debug(f">>> {line.strip()}")
             self.outgoing.task_done()
             return to_bytes(line)
@@ -197,8 +199,6 @@ class PrinterSerialIO(threading.Thread):
             self.outgoing.put(line)
 
     def sendOk(self):
-        if self.outgoing is None:
-            return
         self.send("ok")
 
     def reset(self):

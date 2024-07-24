@@ -25,17 +25,19 @@ class APrinterState:
     def handle_gcode(self, gcode):
         self._log.debug(f"{self.__class__.__name__} gcode execution disabled")
 
-    def connect(self):
-        self._log_skip_state_transition("connect")
+    def start_new_print(self):
+        self._log_skip_state_transition("start_new_print")
 
-    def pause(self):
-        self._log_skip_state_transition("pause")
+    def pause_print(self):
+        self._log_skip_state_transition("pause_print")
 
-    def cancel(self):
-        self._log_skip_state_transition("cancel")
+    def cancel_print(self):
+        self._log_skip_state_transition("cancel_print")
 
-    def resume(self):
-        self._log_skip_state_transition("resume")
+    def resume_print(self):
+        self._log_skip_state_transition("resume_print")
 
     def _log_skip_state_transition(self, method):
-        self._log.debug(f"skipping {self.__class__.__name__} state transition {method}")
+        self._log.debug(
+            f"skipping {self.__class__.__name__} state transition for '{method}'"
+        )
