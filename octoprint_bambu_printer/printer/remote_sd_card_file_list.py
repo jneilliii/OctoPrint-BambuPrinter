@@ -90,7 +90,7 @@ class RemoteSDCardFileList:
     def _connect_ftps_server(self):
         host = self._settings.get(["host"])
         access_code = self._settings.get(["access_code"])
-        ftp = IoTFTPSClient(str(host), 990, "bblp", str(access_code), ssl_implicit=True)
+        ftp = IoTFTPSClient(f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True)
         return ftp
 
     def _get_file_data(self, file_path: str) -> FileInfo | None:

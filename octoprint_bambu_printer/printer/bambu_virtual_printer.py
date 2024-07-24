@@ -5,12 +5,10 @@ __license__ = "GNU Affero General Public License http://www.gnu.org/licenses/agp
 import collections
 from dataclasses import dataclass, field
 import math
-import os
 import queue
 import re
 import threading
 import time
-import asyncio
 from octoprint_bambu_printer.printer.print_job import PrintJob
 from pybambu import BambuClient, commands
 import logging
@@ -99,13 +97,10 @@ class BambuVirtualPrinter:
         self._serial_io.start()
         self._printer_thread.start()
 
-        self._bambu_client: BambuClient = None
-        asyncio.get_event_loop().run_until_complete(self._create_connection_async())
+        self._bambu_client: BambuClient = self._create_client_connection_async()
 
     @property
     def bambu_client(self):
-        if self._bambu_client is None:
-            raise ValueError("No connection to Bambulab was established")
         return self._bambu_client
 
     @property
@@ -133,7 +128,7 @@ class BambuVirtualPrinter:
 
     def update_print_job_info(self):
         print_job_info = self.bambu_client.get_device().print_job
-        filename: str = print_job_info.get("subtask_name")
+        filename: str = print_job_info.subtask_name
         project_file_info = self.file_system.get_data_by_suffix(
             filename, [".3mf", ".gcode.3mf"]
         )
@@ -146,7 +141,7 @@ class BambuVirtualPrinter:
             self.sendOk()
 
         # fuzzy math here to get print percentage to match BambuStudio
-        progress = print_job_info.get("print_percentage")
+        progress = print_job_info.print_percentage
         self._current_print_job = PrintJob(project_file_info, 0)
         self._current_print_job.progress = progress
 
@@ -195,20 +190,27 @@ class BambuVirtualPrinter:
         self._log.debug(f"on connect called")
         return on_connect
 
-    async def _create_connection_async(self):
+    def _create_client_connection_async(self):
+        self._create_client_connection()
+        if self._bambu_client is None:
+            raise RuntimeError("Connection with Bambu Client not established")
+        return self._bambu_client
+
+    def _create_client_connection(self):
         if (
             self._settings.get(["device_type"]) == ""
             or self._settings.get(["serial"]) == ""
             or self._settings.get(["username"]) == ""
             or self._settings.get(["access_code"]) == ""
         ):
-            self._log.debug("invalid settings to start connection with Bambu Printer")
-            return
+            msg = "invalid settings to start connection with Bambu Printer"
+            self._log.debug(msg)
+            raise ValueError(msg)
 
         self._log.debug(
             f"connecting via local mqtt: {self._settings.get_boolean(['local_mqtt'])}"
         )
-        self._bambu_client = BambuClient(
+        bambu_client = BambuClient(
             device_type=self._settings.get(["device_type"]),
             serial=self._settings.get(["serial"]),
             host=self._settings.get(["host"]),
@@ -223,18 +225,17 @@ class BambuVirtualPrinter:
             email=self._settings.get(["email"]),
             auth_token=self._settings.get(["auth_token"]),
         )
-        self._bambu_client.on_disconnect = self.on_disconnect(
-            self._bambu_client.on_disconnect
-        )
-        self._bambu_client.on_connect = self.on_connect(self._bambu_client.on_connect)
-        self._bambu_client.connect(callback=self.new_update)
-        self._log.info(f"bambu connection status: {self._bambu_client.connected}")
+        bambu_client.on_disconnect = self.on_disconnect(bambu_client.on_disconnect)
+        bambu_client.on_connect = self.on_connect(bambu_client.on_connect)
+        bambu_client.connect(callback=self.new_update)
+        self._log.info(f"bambu connection status: {bambu_client.connected}")
         self._serial_io.sendOk()
+        self._bambu_client = bambu_client
 
     def __str__(self):
         return "BAMBU(read_timeout={read_timeout},write_timeout={write_timeout},options={options})".format(
-            read_timeout=self._read_timeout,
-            write_timeout=self._write_timeout,
+            read_timeout=self.timeout,
+            write_timeout=self.write_timeout,
             options={
                 "device_type": self._settings.get(["device_type"]),
                 "host": self._settings.get(["host"]),
@@ -258,21 +259,21 @@ class BambuVirtualPrinter:
 
     @property
     def timeout(self):
-        return self._read_timeout
+        return self._serial_io._read_timeout
 
     @timeout.setter
     def timeout(self, value):
         self._log.debug(f"Setting read timeout to {value}s")
-        self._read_timeout = value
+        self._serial_io._read_timeout = value
 
     @property
     def write_timeout(self):
-        return self._write_timeout
+        return self._serial_io._write_timeout
 
     @write_timeout.setter
     def write_timeout(self, value):
         self._log.debug(f"Setting write timeout to {value}s")
-        self._write_timeout = value
+        self._serial_io._write_timeout = value
 
     @property
     def port(self):
@@ -505,6 +506,8 @@ class BambuVirtualPrinter:
         self._state_change_queue.join()
 
     def _printer_worker(self):
+        self._create_client_connection_async()
+        self.sendIO("Printer connection complete")
         while self._running:
             try:
                 next_state = self._state_change_queue.get(timeout=0.01)

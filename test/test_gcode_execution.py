@@ -124,7 +124,8 @@ def ftps_session_mock(files_info_ftp):
 @fixture(scope="function")
 def print_job_mock():
     print_job = MagicMock()
-    print_job.get.side_effect = DictGetter({"subtask_name": "", "print_percentage": 0})
+    print_job.subtask_name = ""
+    print_job.print_percentage = 0
     return print_job
 
 
@@ -162,7 +163,7 @@ def printer(
     async def _mock_connection(self):
         pass
 
-    BambuVirtualPrinter._create_connection_async = _mock_connection
+    BambuVirtualPrinter._create_client_connection_async = _mock_connection
     serial_obj = BambuVirtualPrinter(
         settings,
         profile_manager,
@@ -224,9 +225,7 @@ def test_print_started_with_selected_file(printer: BambuVirtualPrinter, print_jo
     assert printer.file_system.selected_file is not None
     assert printer.file_system.selected_file.file_name == "print.3mf"
 
-    print_job_mock.get.side_effect = DictGetter(
-        {"subtask_name": "print.3mf", "print_percentage": 0}
-    )
+    print_job_mock.subtask_name = "print.3mf"
 
     printer.write(b"M24\n")
     printer.flush()
@@ -237,9 +236,7 @@ def test_print_started_with_selected_file(printer: BambuVirtualPrinter, print_jo
 
 
 def test_pause_print(printer: BambuVirtualPrinter, bambu_client_mock, print_job_mock):
-    print_job_mock.get.side_effect = DictGetter(
-        {"subtask_name": "print.3mf", "print_percentage": 0}
-    )
+    print_job_mock.subtask_name = "print.3mf"
 
     printer.write(b"M20\n")
     printer.write(b"M23 print.3mf\n")

@@ -6,6 +6,7 @@ import queue
 import re
 import threading
 import time
+import traceback
 from typing import Callable
 
 from octoprint.util import to_bytes, to_unicode
@@ -35,6 +36,7 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
         self._read_timeout = read_timeout
         self._write_timeout = write_timeout
 
+        self.current_line = 0
         self._received_lines = 0
         self._wait_interval = 5.0
         self._running = True
@@ -42,7 +44,7 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
         self._rx_buffer_size = 64
         self._incoming_lock = threading.RLock()
 
-        self.input_bytes = CharCountingQueue(self._rx_buffer_size, name="RxBuffer")
+        self.input_bytes = queue.Queue(self._rx_buffer_size)
         self.output_bytes = queue.Queue()
         self._error_detected: Exception | None = None
 
@@ -77,8 +79,8 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
             except Exception as e:
                 self._error_detected = e
                 self.input_bytes.task_done()
-                self.input_bytes.clear()
-                break
+                self._clearQueue(self.input_bytes)
+                self._log.info("\n".join(traceback.format_exception(e)[-50:]))
 
         self._log.debug("Closing IO read loop")
 
@@ -98,6 +100,9 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
 
     def flush(self):
         self.input_bytes.join()
+        self.raise_if_error()
+
+    def raise_if_error(self):
         if self._error_detected is not None:
             raise self._error_detected
 
@@ -110,11 +115,9 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
                 return 0
 
             try:
-                written = self.input_bytes.put(
-                    data, timeout=self._write_timeout, partial=True
-                )
+                self.input_bytes.put(data, timeout=self._write_timeout)
                 self._log.debug(f"<<< {u_data}")
-                return written
+                return len(data)
             except queue.Full:
                 self._log.error(
                     "Incoming queue is full, raising SerialTimeoutException"
@@ -169,35 +172,36 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
             self.send(self._format_error("checksum_missing"))
             return
 
-        # track N = N + 1
-        linenumber = 0
-        if data.startswith(b"N") and b"M110" in data:
-            linenumber = int(re.search(b"N([0-9]+)", data).group(1))
-            self.lastN = linenumber
-            self.current_line = linenumber
-            self.sendOk()
+        line = self._process_linenumber_marker(data)
+        if line is None:
             return
-        elif data.startswith(b"N"):
-            linenumber = int(re.search(b"N([0-9]+)", data).group(1))
-            expected = self.lastN + 1
-            if linenumber != expected:
-                self._triggerResend(actual=linenumber)
-                return
-            else:
-                self.lastN = linenumber
 
-            data = data.split(None, 1)[1].strip()
-
-        data += b"\n"
-
-        command = to_unicode(data, encoding="ascii", errors="replace").strip()
-
+        command = to_unicode(line, encoding="ascii", errors="replace").strip()
         command_match = self.command_regex.match(command)
         if command_match is not None:
             gcode = command_match.group(0)
             self._handle_command_callback(gcode, command)
         else:
             self._log.warn(f'Not a valid gcode command "{command}"')
+
+    def _process_linenumber_marker(self, data: bytes):
+        linenumber = 0
+        if data.startswith(b"N") and b"M110" in data:
+            linenumber = int(re.search(b"N([0-9]+)", data).group(1))
+            self.lastN = linenumber
+            self.current_line = linenumber
+            self.sendOk()
+            return None
+        elif data.startswith(b"N"):
+            linenumber = int(re.search(b"N([0-9]+)", data).group(1))
+            expected = self.lastN + 1
+            if linenumber != expected:
+                self._triggerResend(actual=linenumber)
+                return None
+            else:
+                self.lastN = linenumber
+            data = data.split(None, 1)[1].strip()
+        return data
 
     def _triggerResend(
         self,
