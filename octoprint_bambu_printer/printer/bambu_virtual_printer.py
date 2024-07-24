@@ -128,16 +128,16 @@ class BambuVirtualPrinter:
 
     def update_print_job_info(self):
         print_job_info = self.bambu_client.get_device().print_job
-        filename: str = print_job_info.subtask_name
+        task_name: str = print_job_info.subtask_name
         project_file_info = self.file_system.get_data_by_suffix(
-            filename, [".3mf", ".gcode.3mf"]
+            task_name, [".3mf", ".gcode.3mf"]
         )
         if project_file_info is None:
             self._log.debug(f"No 3mf file found for {print_job_info}")
             self._current_print_job = None
             return
 
-        if self.file_system.select_file(filename):
+        if self.file_system.select_file(project_file_info.file_name):
             self.sendOk()
 
         # fuzzy math here to get print percentage to match BambuStudio
@@ -307,6 +307,7 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M23")
     def _select_sd_file(self, data: str) -> bool:
         filename = data.split(maxsplit=1)[1].strip()
+        self._list_sd()
         return self.file_system.select_file(filename)
 
     @gcode_executor.register("M26")
@@ -340,6 +341,7 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M30")
     def _delete_sd_file(self, data: str) -> bool:
         filename = data.split(None, 1)[1].strip()
+        self._list_sd()
         self.file_system.delete_file(filename)
         return True
 

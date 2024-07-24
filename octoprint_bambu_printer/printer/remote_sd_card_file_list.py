@@ -22,10 +22,10 @@ class FileInfo:
 
     @property
     def file_name(self):
-        return self.path.name.lower()
+        return self.path.name
 
     def get_log_info(self):
-        return f'{self.dosname} {self.size} {self.timestamp} "{self.path.as_posix()}"'
+        return f'{self.dosname} {self.size} {self.timestamp} "{self.file_name}"'
 
     def to_dict(self):
         return asdict(self)
@@ -103,7 +103,7 @@ class RemoteSDCardFileList:
         self._logger.debug(f"get data for path: {file_name}")
 
         # replace if name is an alias
-        file_name = Path(file_name).name.lower()
+        file_name = Path(file_name).name
         file_name = self._file_alias_cache.get(file_name, file_name)
 
         data = self._file_data_cache.get(file_name, None)
@@ -122,14 +122,19 @@ class RemoteSDCardFileList:
         }
         self._file_data_cache = {info.file_name: info for info in file_info_list}
 
-    def get_data_by_suffix(self, file_name: str, allowed_suffixes: list[str]):
-        file_data = self._get_cached_file_data(file_name)
-        if file_data is None:
-            return None
-        file_path = file_data.path
-        if any(s in allowed_suffixes for s in file_path.suffixes):
-            return file_data
+    def _get_cached_data_by_suffix(self, file_stem: str, allowed_suffixes: list[str]):
+        for suffix in allowed_suffixes:
+            file_data = self._get_cached_file_data(f"{file_stem}{suffix}")
+            if file_data is not None:
+                return file_data
         return None
+
+    def get_data_by_suffix(self, file_stem: str, allowed_suffixes: list[str]):
+        file_data = self._get_cached_data_by_suffix(file_stem, allowed_suffixes)
+        if file_data is None:
+            self._update_existing_files_info()
+            file_data = self._get_cached_data_by_suffix(file_stem, allowed_suffixes)
+        return file_data
 
     def select_file(self, file_path: str, check_already_open: bool = False) -> bool:
         self._logger.debug(
