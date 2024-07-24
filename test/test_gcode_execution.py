@@ -1,15 +1,20 @@
 from __future__ import annotations
+from collections.abc import Callable
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
 import time
+from typing import Any
 import unittest
 from unittest.mock import MagicMock
 import unittest.mock
 
 from octoprint_bambu_printer.bambu_print_plugin import BambuPrintPlugin
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
-from octoprint_bambu_printer.printer.remote_sd_card_file_list import FileInfo
+from octoprint_bambu_printer.printer.remote_sd_card_file_list import (
+    FileInfo,
+    RemoteSDCardFileList,
+)
 from octoprint_bambu_printer.printer.states.idle_state import IdleState
 from octoprint_bambu_printer.printer.states.paused_state import PausedState
 from octoprint_bambu_printer.printer.states.print_finished_state import (
@@ -33,11 +38,11 @@ def log_test():
 
 class DictGetter:
     def __init__(self, options: dict) -> None:
-        self._options = options
+        self._options: dict[str | tuple[str, ...], Any] = options
 
-    def __call__(self, key: str | list[str]):
+    def __call__(self, key: str | list[str] | tuple[str, ...]):
         if isinstance(key, list):
-            key = "_".join(key)
+            key = tuple(key)
         return self._options.get(key, None)
 
 
@@ -96,13 +101,19 @@ def ftps_session_mock(files_info_ftp):
         )
 
         all_files = list(files_info_ftp.keys())
-        ftps_client_mock.list_files.side_effect = DictGetter(
+        file_registry = DictGetter(
             {
                 ("", ".3mf"): all_files,
                 ("cache/", ".3mf"): [f"cache/{file}" for file in all_files],
             }
         )
+        ftps_client_mock.list_files.side_effect = lambda folder, ext: file_registry(
+            (folder, ext)
+        )
         ftps_client_mock.ftps_session = ftps_session
+        RemoteSDCardFileList._connect_ftps_server = MagicMock(
+            return_value=ftps_client_mock
+        )
         yield
 
 

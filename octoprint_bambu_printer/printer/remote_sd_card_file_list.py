@@ -78,9 +78,7 @@ class RemoteSDCardFileList:
             existing_files.append(file_info.file_name)
 
     def _get_existing_files_info(self):
-        host = self._settings.get(["host"])
-        access_code = self._settings.get(["access_code"])
-        ftp = IoTFTPSClient(str(host), 990, "bblp", str(access_code), ssl_implicit=True)
+        ftp = self._connect_ftps_server()
 
         all_files_info: list[FileInfo] = []
         existing_files = []
@@ -94,6 +92,12 @@ class RemoteSDCardFileList:
         )
 
         return all_files_info
+
+    def _connect_ftps_server(self):
+        host = self._settings.get(["host"])
+        access_code = self._settings.get(["access_code"])
+        ftp = IoTFTPSClient(str(host), 990, "bblp", str(access_code), ssl_implicit=True)
+        return ftp
 
     def _get_file_data(self, file_path: str) -> FileInfo | None:
         self._logger.debug(f"_getSdFileData: {file_path}")
