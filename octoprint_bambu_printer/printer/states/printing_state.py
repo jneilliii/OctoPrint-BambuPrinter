@@ -23,16 +23,12 @@ class PrintingState(APrinterState):
     def __init__(self, printer: BambuVirtualPrinter) -> None:
         super().__init__(printer)
         self._is_printing = False
-        self._print_job: PrintJob | None = None
         self._sd_printing_thread = None
-
-    @property
-    def print_job(self):
-        return self._print_job
 
     def init(self):
         self._is_printing = True
-        self._printer.update_print_job_info()
+        self._printer.file_system.remove_file_selection()
+        self.update_print_job_info()
         self._start_worker_thread()
 
     def finalize(self):
@@ -51,10 +47,9 @@ class PrintingState(APrinterState):
         while (
             self._is_printing
             and self._printer.current_print_job is not None
-            and self._printer.current_print_job.file_position
-            < self._printer.current_print_job.file_info.size
+            and self._printer.current_print_job.progress < 100
         ):
-            self._printer.update_print_job_info()
+            self.update_print_job_info()
             self._printer.report_print_job_status()
             time.sleep(3)
 
@@ -63,11 +58,22 @@ class PrintingState(APrinterState):
             self._log.warn("Printing state was triggered with empty print job")
             return
 
-        if (
-            self._printer.current_print_job.file_position
-            >= self._printer.current_print_job.file_info.size
-        ):
+        if self._printer.current_print_job.progress >= 100:
             self._finish_print()
+
+    def update_print_job_info(self):
+        print_job_info = self._printer.bambu_client.get_device().print_job
+        task_name: str = print_job_info.subtask_name
+        project_file_info = self._printer.file_system.get_data_by_suffix(
+            task_name, [".3mf", ".gcode.3mf"]
+        )
+        if project_file_info is None:
+            self._log.debug(f"No 3mf file found for {print_job_info}")
+            self._current_print_job = None
+            return
+
+        progress = print_job_info.print_percentage
+        self._printer.current_print_job = PrintJob(project_file_info, progress)
 
     def pause_print(self):
         if self._printer.bambu_client.connected:

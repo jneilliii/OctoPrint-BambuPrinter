@@ -25,6 +25,9 @@ class APrinterState:
     def handle_gcode(self, gcode):
         self._log.debug(f"{self.__class__.__name__} gcode execution disabled")
 
+    def update_print_job_info(self):
+        self._log_skip_state_transition("start_new_print")
+
     def start_new_print(self):
         self._log_skip_state_transition("start_new_print")
 

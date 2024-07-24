@@ -1,6 +1,4 @@
-__author__ = "Gina Häußge <osd@foosel.net>"
-__license__ = "GNU Affero General Public License http://www.gnu.org/licenses/agpl.html"
-
+from __future__ import annotations
 
 import collections
 from dataclasses import dataclass, field
@@ -113,9 +111,11 @@ class BambuVirtualPrinter:
 
     @property
     def current_print_job(self):
-        if self._current_print_job is None:
-            self.update_print_job_info()
         return self._current_print_job
+
+    @current_print_job.setter
+    def current_print_job(self, value):
+        self._current_print_job = value
 
     def change_state(self, new_state: APrinterState):
         self._state_change_queue.put(new_state)
@@ -126,28 +126,9 @@ class BambuVirtualPrinter:
         elif event_type == "event_printer_data_update":
             self._update_printer_info()
 
-    def update_print_job_info(self):
-        print_job_info = self.bambu_client.get_device().print_job
-        task_name: str = print_job_info.subtask_name
-        project_file_info = self.file_system.get_data_by_suffix(
-            task_name, [".3mf", ".gcode.3mf"]
-        )
-        if project_file_info is None:
-            self._log.debug(f"No 3mf file found for {print_job_info}")
-            self._current_print_job = None
-            return
-
-        if self.file_system.select_file(project_file_info.file_name):
-            self.sendOk()
-
-        # fuzzy math here to get print percentage to match BambuStudio
-        progress = print_job_info.print_percentage
-        self._current_print_job = PrintJob(project_file_info, 0)
-        self._current_print_job.progress = progress
-
     def _update_printer_info(self):
         device_data = self.bambu_client.get_device()
-        print_job = device_data.print_job
+        print_job_state = device_data.print_job.gcode_state
         temperatures = device_data.temperature
 
         self.lastTempAt = time.monotonic()
@@ -158,17 +139,17 @@ class BambuVirtualPrinter:
         self._telemetry.chamberTemp = temperatures.chamber_temp
 
         if (
-            print_job.gcode_state == "IDLE"
-            or print_job.gcode_state == "FINISH"
-            or print_job.gcode_state == "FAILED"
+            print_job_state == "IDLE"
+            or print_job_state == "FINISH"
+            or print_job_state == "FAILED"
         ):
             self.change_state(self._state_idle)
-        elif print_job.gcode_state == "RUNNING":
+        elif print_job_state == "RUNNING":
             self.change_state(self._state_printing)
-        elif print_job.gcode_state == "PAUSE":
+        elif print_job_state == "PAUSE":
             self.change_state(self._state_paused)
         else:
-            self._log.warn(f"Unknown print job state: {print_job.gcode_state}")
+            self._log.warn(f"Unknown print job state: {print_job_state}")
 
     def _update_hms_errors(self):
         bambu_printer = self.bambu_client.get_device()
@@ -312,13 +293,18 @@ class BambuVirtualPrinter:
     def _select_sd_file(self, data: str) -> bool:
         filename = data.split(maxsplit=1)[1].strip()
         self._list_sd()
-        if self.file_system.select_file(filename):
-            assert self.file_system.selected_file is not None
-            self.sendIO(
-                f"File opened: {self.file_system.selected_file.file_name}  "
-                f"Size: {self.file_system.selected_file.size}"
-            )
-            self.sendIO("File selected")
+        if not self.file_system.select_file(filename):
+            return False
+
+        assert self.file_system.selected_file is not None
+        self._current_state.update_print_job_info()
+
+        self.sendIO(
+            f"File opened: {self.file_system.selected_file.file_name}  "
+            f"Size: {self.file_system.selected_file.size}"
+        )
+        self.sendIO("File selected")
+        return True
 
     @gcode_executor.register("M26")
     def _set_sd_position(self, data: str) -> bool:
@@ -345,7 +331,6 @@ class BambuVirtualPrinter:
             else:
                 self._sdstatus_reporter = None
 
-        self.update_print_job_info()
         self.report_print_job_status()
         return True
 
@@ -528,6 +513,10 @@ class BambuVirtualPrinter:
                 self._state_change_queue.task_done()
             except queue.Empty:
                 continue
+            except Exception as e:
+                self._state_change_queue.task_done()
+                raise e
+        self._current_state.finalize()
 
     def _trigger_change_state(self, new_state: APrinterState):
         if self._current_state == new_state:

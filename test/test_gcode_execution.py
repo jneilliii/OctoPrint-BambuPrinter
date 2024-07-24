@@ -318,3 +318,56 @@ def test_regular_move(printer: BambuVirtualPrinter, bambu_client_mock):
 
     gcode_command["print"]["param"] = "G1 X10 Y10\n"
     bambu_client_mock.publish.assert_called_with(gcode_command)
+
+
+def test_file_selection_does_not_affect_current_print(
+    printer: BambuVirtualPrinter, print_job_mock
+):
+    print_job_mock.subtask_name = "print.3mf"
+
+    printer.write(b"M23 print.3mf\nM24\n")
+    printer.flush()
+    printer.readlines()
+    assert isinstance(printer.current_state, PrintingState)
+    assert printer.current_print_job is not None
+    assert printer.current_print_job.file_info.file_name == "print.3mf"
+    assert printer.current_print_job.progress == 0
+
+    printer.write(b"M23 print2.3mf\n")
+    printer.flush()
+    assert printer.current_print_job is not None
+    assert printer.current_print_job.file_info.file_name == "print.3mf"
+    assert printer.current_print_job.progress == 0
+
+
+def test_finished_print_job_reset_after_new_file_selected(
+    printer: BambuVirtualPrinter, print_job_mock
+):
+    print_job_mock.subtask_name = "print.3mf"
+
+    printer.write(b"M23 print.3mf\nM24\n")
+    printer.flush()
+    printer.readlines()
+    assert isinstance(printer.current_state, PrintingState)
+    assert printer.current_print_job is not None
+    assert printer.current_print_job.file_info.file_name == "print.3mf"
+    assert printer.current_print_job.progress == 0
+
+    print_job_mock.print_percentage = 100
+    printer.current_state.update_print_job_info()
+    assert isinstance(printer.current_state, PrintingState)
+    assert printer.current_print_job.progress == 100
+
+    print_job_mock.gcode_state = "FINISH"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
+    assert isinstance(printer.current_state, IdleState)
+    assert printer.current_print_job is not None
+    assert printer.current_print_job.file_info.file_name == "print.3mf"
+    assert printer.current_print_job.progress == 100
+
+    printer.write(b"M23 print2.3mf\n")
+    printer.flush()
+    assert printer.current_print_job is not None
+    assert printer.current_print_job.file_info.file_name == "print2.3mf"
+    assert printer.current_print_job.progress == 0
