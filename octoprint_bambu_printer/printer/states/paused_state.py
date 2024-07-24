@@ -1,8 +1,14 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from octoprint_bambu_printer.printer.bambu_virtual_printer import (
+        BambuVirtualPrinter,
+    )
+
 import threading
 
 from octoprint.util import RepeatedTimer
 
-from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
 from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState
 
 

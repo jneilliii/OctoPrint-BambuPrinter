@@ -17,7 +17,7 @@ from .ftpsclient import IoTFTPSClient
 class FileInfo:
     dosname: str
     path: Path
-    size: int | None
+    size: int
     timestamp: str
 
     @property
@@ -63,7 +63,7 @@ class RemoteSDCardFileList:
         return FileInfo(
             dosname,
             file_path,
-            file_size,
+            file_size if file_size is not None else 0,
             unix_timestamp_to_m20_timestamp(int(filedate)),
         )
 

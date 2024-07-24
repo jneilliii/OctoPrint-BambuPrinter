@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from octoprint_bambu_printer.printer.bambu_virtual_printer import (
+        BambuVirtualPrinter,
+    )
+
 import threading
 
 import pybambu
 import pybambu.models
 import pybambu.commands
 
-from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
 from octoprint_bambu_printer.printer.print_job import PrintJob
 from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState
 
@@ -40,7 +47,8 @@ class PrintingState(APrinterState):
             )
             self._sd_printing_thread.start()
 
-    def set_print_job_info(self, print_job_info):
+    def update_print_job_info(self):
+        print_job_info = self._printer.bambu_client.get_device().print_job
         filename: str = print_job_info.get("subtask_name")
         project_file_info = self._printer.file_system.search_by_stem(
             filename, [".3mf", ".gcode.3mf"]
@@ -56,7 +64,7 @@ class PrintingState(APrinterState):
         # fuzzy math here to get print percentage to match BambuStudio
         progress = print_job_info.get("print_percentage")
         self._print_job = PrintJob(project_file_info, 0)
-        self._print_job.progress = 
+        self._print_job.progress = progress
 
     def start_new_print(self, from_printer: bool = False):
         if self._printer.file_system.selected_file is not None:
@@ -93,24 +101,27 @@ class PrintingState(APrinterState):
                             else f"file:///sdcard/{selected_file}"
                         ),
                         "timelapse": self._printer._settings.get_boolean(["timelapse"]),
-                        "bed_leveling": self._printer._settings.get_boolean(["bed_leveling"]),
+                        "bed_leveling": self._printer._settings.get_boolean(
+                            ["bed_leveling"]
+                        ),
                         "flow_cali": self._printer._settings.get_boolean(["flow_cali"]),
                         "vibration_cali": self._printer._settings.get_boolean(
                             ["vibration_cali"]
                         ),
-                        "layer_inspect": self._printer._settings.get_boolean(["layer_inspect"]),
+                        "layer_inspect": self._printer._settings.get_boolean(
+                            ["layer_inspect"]
+                        ),
                         "use_ams": self._printer._settings.get_boolean(["use_ams"]),
                     }
                 }
                 self._printer.bambu_client.publish(print_command)
 
-            while self._selectedSdFilePos < self._selectedSdFileSize:
-                if self._killed or not self._sdPrinting:
+            while self._print_job.file_position < self._print_job.file_info.size:
+                if self._printer.is_running:
                     break
 
-                # if we are paused, wait for resuming
-                self._sdPrintingSemaphore.wait()
-                self._reportSdStatus()
+                self._printingLock.wait()
+                self._printer.report_print_job_status()
                 time.sleep(3)
             self._log.debug(f"SD File Print: {self._selectedSdFile}")
         except AttributeError:

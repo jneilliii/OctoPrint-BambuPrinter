@@ -4,6 +4,8 @@ import threading
 import time
 import flask
 import datetime
+import logging.handlers
+from urllib.parse import quote as urlquote
 
 import octoprint.printer
 import octoprint.server
@@ -21,11 +23,8 @@ from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
 
 from pybambu import BambuCloud
 
-from urllib.parse import quote as urlquote
-import logging.handlers
-
-from octoprint_bambu_printer.bambu_virtual_printer import BambuVirtualPrinter
-from .ftpsclient import IoTFTPSClient
+from .printer.ftpsclient.ftpsclient import IoTFTPSClient
+from .printer.bambu_virtual_printer import BambuVirtualPrinter
 
 
 class BambuPrintPlugin(
@@ -170,7 +169,7 @@ class BambuPrintPlugin(
             self._settings,
             self._printer_profile_manager,
             data_folder=self.get_plugin_data_folder(),
-            seriallog_handler=seriallog_handler,
+            serial_log_handler=seriallog_handler,
             read_timeout=float(read_timeout),
             faked_baudrate=baudrate,
         )

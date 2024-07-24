@@ -56,6 +56,7 @@ class BambuVirtualPrinter:
         printer_profile_manager,
         data_folder,
         serial_log_handler=None,
+        read_timeout=5.0,
         faked_baudrate=115200,
     ):
         self._log = logging.getLogger("octoprint.plugins.bambu_printer.BambuPrinter")
@@ -68,7 +69,7 @@ class BambuVirtualPrinter:
         self._serial_io = PrinterSerialIO(
             self._process_gcode_serial_command,
             serial_log_handler,
-            read_timeout=5.0,
+            read_timeout=read_timeout,
             write_timeout=10.0,
         )
 
@@ -106,6 +107,10 @@ class BambuVirtualPrinter:
     @property
     def is_running(self):
         return self._running
+
+    @property
+    def current_state(self):
+        return self._current_state
 
     @property
     def current_print_job(self):
@@ -148,7 +153,7 @@ class BambuVirtualPrinter:
 
         if print_job.gcode_state == "RUNNING":
             self.change_state(self._state_printing)
-            self._state_printing.set_print_job_info(print_job)
+            self._state_printing.update_print_job_info()
         if print_job.gcode_state == "PAUSE":
             self.change_state(self._state_paused)
         if print_job.gcode_state == "FINISH" or print_job.gcode_state == "FAILED":
