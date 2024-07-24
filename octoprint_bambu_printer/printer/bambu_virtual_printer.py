@@ -6,9 +6,7 @@ import collections
 from dataclasses import dataclass, field
 import math
 import os
-import queue
 import re
-import threading
 import time
 import asyncio
 from pybambu import BambuClient, commands
@@ -477,27 +475,6 @@ class BambuVirtualPrinter:
             return True
         else:
             return False
-
-    def _writeSdFile(self, filename: str) -> None:
-        self.sendIO(f"Writing to file: {filename}")
-
-    def _finishSdFile(self):
-        # FIXME: maybe remove or move to remote SD card
-        try:
-            self._writingToSdHandle.close()
-        except Exception:
-            pass
-        finally:
-            self._writingToSdHandle = None
-        self._writingToSd = False
-        self._selectedSdFile = None
-        # Most printers don't have RTC and set some ancient date
-        # by default. Emulate that using 2000-01-01 01:00:00
-        # (taken from prusa firmware behaviour)
-        st = os.stat(self._writingToSdFile)
-        os.utime(self._writingToSdFile, (st.st_atime, 946684800))
-        self._writingToSdFile = None
-        self.sendIO("Done saving file")
 
     def close(self):
         if self.bambu_client.connected:

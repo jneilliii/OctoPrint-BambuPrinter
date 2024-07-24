@@ -80,18 +80,12 @@ class RemoteSDCardFileList:
     def _get_existing_files_info(self):
         ftp = self._connect_ftps_server()
 
-        all_files_info: list[FileInfo] = []
+        file_list = []
+        file_list.extend(ftp.list_files("", ".3mf") or [])
+        file_list.extend(ftp.list_files("cache/", ".3mf") or [])
+
         existing_files = []
-
-        filelist = ftp.list_files("", ".3mf") or []
-        all_files_info.extend(self._scan_ftp_file_list(ftp, filelist, existing_files))
-
-        filelist_cache = ftp.list_files("cache/", ".3mf") or []
-        all_files_info.extend(
-            self._scan_ftp_file_list(ftp, filelist_cache, existing_files)
-        )
-
-        return all_files_info
+        return list(self._scan_ftp_file_list(ftp, file_list, existing_files))
 
     def _connect_ftps_server(self):
         host = self._settings.get(["host"])

@@ -44,6 +44,7 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
 
         self.input_bytes = CharCountingQueue(self._rx_buffer_size, name="RxBuffer")
         self.output_bytes = queue.Queue()
+        self._error_detected: Exception | None = None
 
     def _init_logger(self, log_handler):
         log = logging.getLogger("octoprint.plugins.bambu_printer.BambuPrinter.serial")
@@ -63,7 +64,6 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
             try:
                 data = self.input_bytes.get(block=True, timeout=0.01)
                 data = to_bytes(data, encoding="ascii", errors="replace")
-                self.input_bytes.task_done()
 
                 buffer += data
                 line, buffer = self._read_next_line(buffer)
@@ -71,8 +71,12 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
                     self._received_lines += 1
                     self._process_input_gcode_line(line)
                     line, buffer = self._read_next_line(buffer)
+                self.input_bytes.task_done()
             except queue.Empty:
                 continue
+            except Exception as e:
+                self._error_detected = e
+                break
 
         self._log.debug("Closing IO read loop")
 
@@ -92,6 +96,8 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
 
     def flush(self):
         self.input_bytes.join()
+        if self._error_detected is not None:
+            raise self._error_detected
 
     def write(self, data: bytes) -> int:
         data = to_bytes(data, errors="replace")

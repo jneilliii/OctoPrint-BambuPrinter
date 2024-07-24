@@ -84,6 +84,8 @@ def files_info_ftp():
     return {
         "print.3mf": (1000, _f_date(datetime(2024, 5, 6))),
         "print2.3mf": (1200, _f_date(datetime(2024, 5, 7))),
+        "cache/print.3mf": (1200, _f_date(datetime(2024, 5, 7))),
+        "cache/print2.3mf": (1200, _f_date(datetime(2024, 5, 7))),
     }
 
 
@@ -104,8 +106,12 @@ def ftps_session_mock(files_info_ftp):
         all_files = list(files_info_ftp.keys())
         file_registry = DictGetter(
             {
-                ("", ".3mf"): all_files,
-                ("cache/", ".3mf"): [f"cache/{file}" for file in all_files],
+                ("", ".3mf"): list(
+                    filter(lambda f: Path(f).parent == Path("."), all_files)
+                ),
+                ("cache/", ".3mf"): list(
+                    filter(lambda f: Path(f).parent == Path("cache/"), all_files)
+                ),
             }
         )
         ftps_client_mock.list_files.side_effect = lambda folder, ext: file_registry(
@@ -118,7 +124,7 @@ def ftps_session_mock(files_info_ftp):
         yield
 
 
-@fixture
+@fixture(scope="function")
 def printer(output_test_folder, settings, profile_manager, log_test, ftps_session_mock):
     async def _mock_connection(self):
         pass
@@ -145,12 +151,36 @@ def test_list_sd_card(printer: BambuVirtualPrinter):
     printer.write(b"M20\n")  # GCode for listing SD card
     printer.flush()
     result = printer.readlines()
-    assert result == ""  # Replace with the actual expected result
+    assert result[0] == b"Begin file list"
+    assert result[1].endswith(b'"print.3mf"')
+    assert result[2].endswith(b'"print2.3mf"')
+    assert result[3] == b"End file list"
+    assert result[4] == b"ok"
 
 
-def test_start_print(printer: BambuVirtualPrinter):
-    printer.write(b"M\n")
-    result = printer.readline()
+def test_cannot_start_print_without_file(printer: BambuVirtualPrinter):
+    printer.write(b"M24\n")
+    printer.flush()
+
+    result = printer.readlines()
+    assert result[0] == b"ok"
+    assert isinstance(printer.current_state, IdleState)
+
+
+def test_print_started_with_selected_file(printer: BambuVirtualPrinter):
+    assert printer.file_system.selected_file is None
+
+    printer.write(b"M23 print.3mf\n")
+    printer.flush()
+
+    assert printer.file_system.selected_file is not None
+    assert printer.file_system.selected_file.file_name == "print.3mf"
+
+    printer.write(b"M24\n")
+    printer.flush()
+
+    result = printer.readlines()
+    assert result[0] == b"ok"
     assert isinstance(printer.current_state, PrintingState)
 
 
