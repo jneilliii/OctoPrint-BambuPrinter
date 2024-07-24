@@ -96,6 +96,7 @@ def ftps_session_mock(files_info_ftp):
         ftps_session.size.side_effect = DictGetter(
             {file: info[0] for file, info in files_info_ftp.items()}
         )
+
         ftps_session.sendcmd.side_effect = DictGetter(
             {f"MDTM {file}": info[1] for file, info in files_info_ftp.items()}
         )
@@ -141,7 +142,7 @@ def test_initial_state(printer: BambuVirtualPrinter):
 
 def test_list_sd_card(printer: BambuVirtualPrinter):
     printer.write(b"M20\n")  # GCode for listing SD card
-    printer.flush()
+    printer.close()
     result = printer.readlines()
     assert result == ""  # Replace with the actual expected result
 

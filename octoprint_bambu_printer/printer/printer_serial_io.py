@@ -64,24 +64,25 @@ class PrinterSerialIO(threading.Thread):
                 data = to_bytes(data, encoding="ascii", errors="replace")
                 self.input_bytes.task_done()
 
-                line, buffer = self._read_next_line_buffered(data, buffer)
+                buffer += data
+                line, buffer = self._read_next_line(buffer)
                 while line is not None:
                     self._received_lines += 1
                     self._process_input_gcode_line(line)
-                    line, buffer = self._read_next_line_buffered(data, buffer)
+                    line, buffer = self._read_next_line(buffer)
             except queue.Empty:
                 continue
 
         self._log.debug("Closing IO read loop")
 
-    def _read_next_line_buffered(self, additional: bytes, buffer: bytes):
-        buffer += additional
+    def _read_next_line(self, buffer: bytes):
         new_line_pos = buffer.find(b"\n") + 1
         if new_line_pos > 0:
-            additional = buffer[:new_line_pos]
+            line = buffer[:new_line_pos]
             buffer = buffer[new_line_pos:]
-
-        return additional, buffer
+            return line, buffer
+        else:
+            return None, buffer
 
     def close(self):
         self.flush()
