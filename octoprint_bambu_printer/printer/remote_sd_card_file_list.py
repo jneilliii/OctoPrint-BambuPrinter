@@ -116,16 +116,13 @@ class RemoteSDCardFileList:
         }
         self._file_data_cache = {info.file_name: info for info in file_info_list}
 
-    def search_by_stem(self, file_stem: str, allowed_suffixes: list[str]):
-        for file_name in self._file_data_cache:
-            file_data = self._get_file_data(file_name)
-            if file_data is None:
-                continue
-            file_path = file_data.path
-            if file_path.stem == file_stem and any(
-                s in allowed_suffixes for s in file_path.suffixes
-            ):
-                return file_data
+    def get_data_by_suffix(self, file_name: str, allowed_suffixes: list[str]):
+        file_data = self._get_file_data(file_name)
+        if file_data is None:
+            return None
+        file_path = file_data.path
+        if any(s in allowed_suffixes for s in file_path.suffixes):
+            return file_data
         return None
 
     def select_file(self, file_path: str, check_already_open: bool = False) -> bool:

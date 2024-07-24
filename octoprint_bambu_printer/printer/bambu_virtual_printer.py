@@ -6,9 +6,12 @@ import collections
 from dataclasses import dataclass, field
 import math
 import os
+import queue
 import re
+import threading
 import time
 import asyncio
+from octoprint_bambu_printer.printer.print_job import PrintJob
 from pybambu import BambuClient, commands
 import logging
 import logging.handlers
@@ -19,7 +22,6 @@ from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState
 from octoprint_bambu_printer.printer.states.idle_state import IdleState
 
 from .printer_serial_io import PrinterSerialIO
-from .states.print_finished_state import PrintFinishedState
 from .states.paused_state import PausedState
 from .states.printing_state import PrintingState
 
@@ -62,8 +64,17 @@ class BambuVirtualPrinter:
         self._state_idle = IdleState(self)
         self._state_printing = PrintingState(self)
         self._state_paused = PausedState(self)
-        self._state_finished = PrintFinishedState(self)
         self._current_state = self._state_idle
+
+        self._running = True
+        self._printer_thread = threading.Thread(
+            target=self._printer_worker,
+            name="octoprint.plugins.bambu_printer.printer_worker",
+        )
+        self._state_change_queue = queue.Queue()
+
+        self._current_print_job: PrintJob | None = None
+
         self._serial_io = PrinterSerialIO(
             handle_command_callback=self._process_gcode_serial_command,
             settings=settings,
@@ -77,21 +88,16 @@ class BambuVirtualPrinter:
             "heatedChamber"
         )
 
-        self._running = True
         self.file_system = RemoteSDCardFileList(settings)
-
-        self._busy_reason = None
-        self._busy_loop = None
-        self._busy_interval = 2.0
 
         self._settings = settings
         self._printer_profile_manager = printer_profile_manager
         self._faked_baudrate = faked_baudrate
-        self._plugin_data_folder = data_folder
 
         self._last_hms_errors = None
 
         self._serial_io.start()
+        self._printer_thread.start()
 
         self._bambu_client: BambuClient = None
         asyncio.get_event_loop().run_until_complete(self._create_connection_async())
@@ -112,20 +118,12 @@ class BambuVirtualPrinter:
 
     @property
     def current_print_job(self):
-        if isinstance(self._current_state, PrintingState):
-            return self._current_state.print_job
-        return None
+        if self._current_print_job is None:
+            self.update_print_job_info()
+        return self._current_print_job
 
     def change_state(self, new_state: APrinterState):
-        if self._current_state == new_state:
-            return
-        self._log.debug(
-            f"Changing state from {self._current_state.__class__.__name__} to {new_state.__class__.__name__}"
-        )
-
-        self._current_state.finalize()
-        self._current_state = new_state
-        self._current_state.init()
+        self._state_change_queue.put(new_state)
 
     def new_update(self, event_type):
         if event_type == "event_hms_errors":
@@ -133,28 +131,49 @@ class BambuVirtualPrinter:
         elif event_type == "event_printer_data_update":
             self._update_printer_info()
 
+    def update_print_job_info(self):
+        print_job_info = self.bambu_client.get_device().print_job
+        filename: str = print_job_info.get("subtask_name")
+        project_file_info = self.file_system.get_data_by_suffix(
+            filename, [".3mf", ".gcode.3mf"]
+        )
+        if project_file_info is None:
+            self._log.debug(f"No 3mf file found for {print_job_info}")
+            self._current_print_job = None
+            return
+
+        if self.file_system.select_file(filename):
+            self.sendOk()
+
+        # fuzzy math here to get print percentage to match BambuStudio
+        progress = print_job_info.get("print_percentage")
+        self._current_print_job = PrintJob(project_file_info, 0)
+        self._current_print_job.progress = progress
+
     def _update_printer_info(self):
         device_data = self.bambu_client.get_device()
-        ams = device_data.ams.__dict__
         print_job = device_data.print_job
-        temperatures = device_data.temperature.__dict__
-        lights = device_data.lights.__dict__
-        fans = device_data.fans.__dict__
-        speed = device_data.speed.__dict__
+        temperatures = device_data.temperature
 
         self.lastTempAt = time.monotonic()
-        self._telemetry.temp[0] = temperatures.get("nozzle_temp", 0.0)
-        self._telemetry.targetTemp[0] = temperatures.get("target_nozzle_temp", 0.0)
-        self.bedTemp = temperatures.get("bed_temp", 0.0)
-        self.bedTargetTemp = temperatures.get("target_bed_temp", 0.0)
-        self.chamberTemp = temperatures.get("chamber_temp", 0.0)
+        self._telemetry.temp[0] = temperatures.nozzle_temp
+        self._telemetry.targetTemp[0] = temperatures.target_nozzle_temp
+        self._telemetry.bedTemp = temperatures.bed_temp
+        self._telemetry.bedTargetTemp = temperatures.target_bed_temp
+        self._telemetry.chamberTemp = temperatures.chamber_temp
 
-        if print_job.gcode_state == "RUNNING":
+        if (
+            print_job.gcode_state == "IDLE"
+            or print_job.gcode_state == "FINISH"
+            or print_job.gcode_state == "FAILED"
+        ):
+            self.change_state(self._state_idle)
+        elif print_job.gcode_state == "RUNNING":
             self.change_state(self._state_printing)
-        if print_job.gcode_state == "PAUSE":
+        elif print_job.gcode_state == "PAUSE":
             self.change_state(self._state_paused)
-        if print_job.gcode_state == "FINISH" or print_job.gcode_state == "FAILED":
-            self.change_state(self._state_finished)
+        else:
+            self._log.warn(f"Unknown print job state: {print_job.gcode_state}")
 
     def _update_hms_errors(self):
         bambu_printer = self.bambu_client.get_device()
@@ -280,6 +299,7 @@ class BambuVirtualPrinter:
 
     def flush(self):
         self._serial_io.flush()
+        self._wait_for_state_change()
 
     ##~~ command implementations
 
@@ -337,7 +357,6 @@ class BambuVirtualPrinter:
 
     @gcode_executor.register("M117")
     def _get_lcd_message(self, data: str) -> bool:
-        # we'll just use this to echo a message, to allow playing around with pause triggers
         result = re.search(r"M117\s+(.*)", data).group(1)
         self.sendIO(f"echo:{result}")
         return True
@@ -386,16 +405,9 @@ class BambuVirtualPrinter:
                 self._log.info(f"{percent}% speed adjustment command sent successfully")
         return True
 
-    def _process_gcode_serial_command(
-        self, gcode_letter: str, gcode: str, full_command: str
-    ):
-        self._log.debug(
-            f"processing gcode command letter = {gcode_letter} | gcode = {gcode} | full = {full_command}"
-        )
-        if gcode_letter in self.gcode_executor:
-            handled = self.gcode_executor.execute(self, gcode_letter, full_command)
-        else:
-            handled = self.gcode_executor.execute(self, gcode, full_command)
+    def _process_gcode_serial_command(self, gcode: str, full_command: str):
+        self._log.debug(f"processing gcode {gcode} command = {full_command}")
+        handled = self.gcode_executor.execute(self, gcode, full_command)
         if handled:
             self._serial_io.sendOk()
             return
@@ -453,9 +465,12 @@ class BambuVirtualPrinter:
         template = "{heater}:{actual:.2f}/ {target:.2f}"
         temps = collections.OrderedDict()
         temps["T"] = (self._telemetry.temp[0], self._telemetry.targetTemp[0])
-        temps["B"] = (self.bedTemp, self.bedTargetTemp)
+        temps["B"] = (self._telemetry.bedTemp, self._telemetry.bedTargetTemp)
         if self._telemetry.hasChamber:
-            temps["C"] = (self.chamberTemp, self._telemetry.chamberTargetTemp)
+            temps["C"] = (
+                self._telemetry.chamberTemp,
+                self._telemetry.chamberTargetTemp,
+            )
 
         output = " ".join(
             map(
@@ -480,6 +495,34 @@ class BambuVirtualPrinter:
             self.bambu_client.disconnect()
         self.change_state(self._state_idle)
         self._serial_io.close()
+        self.stop()
+
+    def stop(self):
+        self._running = False
+        self._printer_thread.join()
+
+    def _wait_for_state_change(self):
+        self._state_change_queue.join()
+
+    def _printer_worker(self):
+        while self._running:
+            try:
+                next_state = self._state_change_queue.get(timeout=0.01)
+                self._trigger_change_state(next_state)
+                self._state_change_queue.task_done()
+            except queue.Empty:
+                continue
+
+    def _trigger_change_state(self, new_state: APrinterState):
+        if self._current_state == new_state:
+            return
+        self._log.debug(
+            f"Changing state from {self._current_state.__class__.__name__} to {new_state.__class__.__name__}"
+        )
+
+        self._current_state.finalize()
+        self._current_state = new_state
+        self._current_state.init()
 
     def _showPrompt(self, text, choices):
         self._hidePrompt()

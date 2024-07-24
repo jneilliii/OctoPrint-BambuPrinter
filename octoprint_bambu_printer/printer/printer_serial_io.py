@@ -19,7 +19,7 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
 
     def __init__(
         self,
-        handle_command_callback: Callable[[str, str, str], None],
+        handle_command_callback: Callable[[str, str], None],
         settings,
         serial_log_handler=None,
         read_timeout=5.0,
@@ -192,13 +192,12 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
 
         command = to_unicode(data, encoding="ascii", errors="replace").strip()
 
-        # actual command handling
         command_match = self.command_regex.match(command)
         if command_match is not None:
             gcode = command_match.group(0)
-            gcode_letter = command_match.group(1)
-
-            self._handle_command_callback(gcode_letter, gcode, command)
+            self._handle_command_callback(gcode, command)
+        else:
+            self._log.warn(f'Not a valid gcode command "{command}"')
 
     def _triggerResend(
         self,

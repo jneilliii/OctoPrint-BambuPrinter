@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 import threading
 
+import pybambu.commands
 from octoprint.util import RepeatedTimer
 
 from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState
@@ -42,3 +43,11 @@ class PausedState(APrinterState):
             condition=self._pausedLock.is_set,
         )
         paused_timer.start()
+
+    def resume_print(self):
+        if self._printer.bambu_client.connected:
+            if self._printer.bambu_client.publish(pybambu.commands.RESUME):
+                self._log.info("print resumed")
+                self._printer.change_state(self._printer._state_printing)
+            else:
+                self._log.info("print resume failed")

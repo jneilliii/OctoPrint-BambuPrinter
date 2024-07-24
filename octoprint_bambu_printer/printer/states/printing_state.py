@@ -22,7 +22,7 @@ class PrintingState(APrinterState):
 
     def __init__(self, printer: BambuVirtualPrinter) -> None:
         super().__init__(printer)
-        self._printing_lock = threading.Event()
+        self._is_printing = False
         self._print_job: PrintJob | None = None
         self._sd_printing_thread = None
 
@@ -31,73 +31,52 @@ class PrintingState(APrinterState):
         return self._print_job
 
     def init(self):
-        self._printing_lock.set()
-        self.update_print_job_info()
+        self._is_printing = True
+        self._printer.update_print_job_info()
         self._start_worker_thread()
 
     def finalize(self):
-        self._printing_lock.clear()
 
         if self._sd_printing_thread is not None and self._sd_printing_thread.is_alive():
+            self._is_printing = False
             self._sd_printing_thread.join()
             self._sd_printing_thread = None
 
     def _start_worker_thread(self):
         if self._sd_printing_thread is None:
-            if not self._printing_lock.is_set():
-                self._printing_lock.set()
+            self._is_printing = True
             self._sd_printing_thread = threading.Thread(target=self._printing_worker)
             self._sd_printing_thread.start()
 
-    def update_print_job_info(self):
-        print_job_info = self._printer.bambu_client.get_device().print_job
-        filename: str = print_job_info.get("subtask_name")
-        project_file_info = self._printer.file_system.search_by_stem(
-            filename, [".3mf", ".gcode.3mf"]
-        )
-        if project_file_info is None:
-            self._log.debug(f"No 3mf file found for {print_job_info}")
-            self._print_job = None
+    def _printing_worker(self):
+        while (
+            self._is_printing
+            and self._printer.current_print_job is not None
+            and self._printer.current_print_job.file_position
+            < self._printer.current_print_job.file_info.size
+        ):
+            self._printer.update_print_job_info()
+            self._printer.report_print_job_status()
+            time.sleep(3)
+
+        if self._printer.current_print_job is None:
+
+            self._log.warn("Printing state was triggered with empty print job")
             return
 
-        if self._printer.file_system.select_file(filename):
-            self._printer.sendOk()
-
-        # fuzzy math here to get print percentage to match BambuStudio
-        progress = print_job_info.get("print_percentage")
-        self._print_job = PrintJob(project_file_info, 0)
-        self._print_job.progress = progress
-
-    def _printing_worker(self):
-        if self._print_job is not None:
-            while (
-                self._printer.is_running
-                and self._print_job.file_info is not None
-                and self._print_job.file_position < self._print_job.file_info.size
-            ):
-                self.update_print_job_info()
-                self._printer.report_print_job_status()
-                time.sleep(3)
-                self._printing_lock.wait()
-            self._log.debug(
-                f"SD File Print finishing: {self._print_job.file_info.file_name}"
-            )
-        self._printer.change_state(self._printer._state_finished)
+        if (
+            self._printer.current_print_job.file_position
+            >= self._printer.current_print_job.file_info.size
+        ):
+            self._finish_print()
 
     def pause_print(self):
         if self._printer.bambu_client.connected:
             if self._printer.bambu_client.publish(pybambu.commands.PAUSE):
                 self._log.info("print paused")
-                self._printer.change_state(self._printer._state_finished)
+                self._printer.change_state(self._printer._state_paused)
             else:
                 self._log.info("print pause failed")
-
-    def resume_print(self):
-        if self._printer.bambu_client.connected:
-            if self._printer.bambu_client.publish(pybambu.commands.RESUME):
-                self._log.info("print resumed")
-            else:
-                self._log.info("print resume failed")
 
     def cancel_print(self):
         if self._printer.bambu_client.connected:
@@ -106,3 +85,11 @@ class PrintingState(APrinterState):
                 self._printer.change_state(self._printer._state_finished)
             else:
                 self._log.info("print cancel failed")
+
+    def _finish_print(self):
+        if self._printer.current_print_job is not None:
+            self._log.debug(
+                f"SD File Print finishing: {self._printer.current_print_job.file_info.file_name}"
+            )
+
+        self._printer.change_state(self._printer._state_idle)

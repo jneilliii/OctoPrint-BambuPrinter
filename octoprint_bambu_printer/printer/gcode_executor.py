@@ -310,7 +310,7 @@ class GCodeExecutor:
                 return self.gcode_handlers_no_data[gcode](printer)
             else:
                 self._log.debug(f"ignoring {gcode_info} command.")
-                return True
+                return False
         except Exception as e:
             self._log.error(f"Error during gcode {gcode_info}")
             raise

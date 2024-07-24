@@ -6,20 +6,17 @@ from pathlib import Path
 import time
 from typing import Any
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 import unittest.mock
 
-from octoprint_bambu_printer.bambu_print_plugin import BambuPrintPlugin
+import pybambu
+import pybambu.commands
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
 from octoprint_bambu_printer.printer.remote_sd_card_file_list import (
-    FileInfo,
     RemoteSDCardFileList,
 )
 from octoprint_bambu_printer.printer.states.idle_state import IdleState
 from octoprint_bambu_printer.printer.states.paused_state import PausedState
-from octoprint_bambu_printer.printer.states.print_finished_state import (
-    PrintFinishedState,
-)
 from octoprint_bambu_printer.printer.states.printing_state import PrintingState
 from pytest import fixture
 
@@ -125,7 +122,43 @@ def ftps_session_mock(files_info_ftp):
 
 
 @fixture(scope="function")
-def printer(output_test_folder, settings, profile_manager, log_test, ftps_session_mock):
+def print_job_mock():
+    print_job = MagicMock()
+    print_job.get.side_effect = DictGetter({"subtask_name": "", "print_percentage": 0})
+    return print_job
+
+
+@fixture(scope="function")
+def temperatures_mock():
+    temperatures = MagicMock()
+    temperatures.nozzle_temp = 0
+    temperatures.target_nozzle_temp = 0
+    temperatures.bed_temp = 0
+    temperatures.target_bed_temp = 0
+    temperatures.chamber_temp = 0
+    return temperatures
+
+
+@fixture(scope="function")
+def bambu_client_mock(print_job_mock, temperatures_mock) -> pybambu.BambuClient:
+    bambu_client = MagicMock()
+    bambu_client.connected = True
+    device_mock = MagicMock()
+    device_mock.print_job = print_job_mock
+    device_mock.temperatures = temperatures_mock
+    bambu_client.get_device.return_value = device_mock
+    return bambu_client
+
+
+@fixture(scope="function")
+def printer(
+    output_test_folder,
+    settings,
+    profile_manager,
+    log_test,
+    ftps_session_mock,
+    bambu_client_mock,
+):
     async def _mock_connection(self):
         pass
 
@@ -138,7 +171,7 @@ def printer(output_test_folder, settings, profile_manager, log_test, ftps_sessio
         read_timeout=0.01,
         faked_baudrate=115200,
     )
-    serial_obj._bambu_client = MagicMock()
+    serial_obj._bambu_client = bambu_client_mock
     yield serial_obj
     serial_obj.close()
 
@@ -166,7 +199,9 @@ def test_cannot_start_print_without_file(printer: BambuVirtualPrinter):
     assert isinstance(printer.current_state, IdleState)
 
 
-def test_non_existing_file_not_ok(printer: BambuVirtualPrinter):
+def test_non_existing_file_not_selected(printer: BambuVirtualPrinter):
+    assert printer.file_system.selected_file is None
+
     printer.write(b"M23 non_existing.3mf\n")
     printer.flush()
     result = printer.readlines()
@@ -174,7 +209,7 @@ def test_non_existing_file_not_ok(printer: BambuVirtualPrinter):
     assert printer.file_system.selected_file is None
 
 
-def test_print_started_with_selected_file(printer: BambuVirtualPrinter):
+def test_print_started_with_selected_file(printer: BambuVirtualPrinter, print_job_mock):
     assert printer.file_system.selected_file is None
 
     printer.write(b"M20\n")
@@ -189,6 +224,10 @@ def test_print_started_with_selected_file(printer: BambuVirtualPrinter):
     assert printer.file_system.selected_file is not None
     assert printer.file_system.selected_file.file_name == "print.3mf"
 
+    print_job_mock.get.side_effect = DictGetter(
+        {"subtask_name": "print.3mf", "print_percentage": 0}
+    )
+
     printer.write(b"M24\n")
     printer.flush()
 
@@ -197,32 +236,81 @@ def test_print_started_with_selected_file(printer: BambuVirtualPrinter):
     assert isinstance(printer.current_state, PrintingState)
 
 
-def test_pause_print(printer: BambuVirtualPrinter):
-    gcode = b"G28\nG1 X10 Y10\n"
-    printer.write(gcode)
+def test_pause_print(printer: BambuVirtualPrinter, bambu_client_mock, print_job_mock):
+    print_job_mock.get.side_effect = DictGetter(
+        {"subtask_name": "print.3mf", "print_percentage": 0}
+    )
+
+    printer.write(b"M20\n")
+    printer.write(b"M23 print.3mf\n")
+    printer.write(b"M24\n")
+    printer.flush()
+    printer.readlines()
+    assert isinstance(printer.current_state, PrintingState)
+
+    bambu_client_mock.publish.return_value = True
     printer.write(b"M25\n")  # GCode for pausing the print
-    result = printer.readline()
+    printer.flush()
+    result = printer.readlines()
+    assert result[0] == b"ok"
     assert isinstance(printer.current_state, PausedState)
 
 
-def test_get_printing_info(printer: BambuVirtualPrinter):
-    gcode = b"G28\nG1 X10 Y10\n"
-    printer.write(gcode)
-    printer.write(b"M27\n")  # GCode for getting printing info
-    result = printer.readline()
-    assert result == ""
+def test_events_update_printer_state(printer: BambuVirtualPrinter, print_job_mock):
+    print_job_mock.gcode_state = "RUNNING"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
+    assert isinstance(printer.current_state, PrintingState)
 
+    print_job_mock.gcode_state = "PAUSE"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
+    assert isinstance(printer.current_state, PausedState)
 
-def test_abort_print(printer: BambuVirtualPrinter):
-    gcode = b"G28\nG1 X10 Y10\n"
-    printer.write(gcode)
-    printer.write(b"M26\n")  # GCode for aborting the print
-    result = printer.readline()
+    print_job_mock.gcode_state = "IDLE"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
+    assert isinstance(printer.current_state, IdleState)
+
+    print_job_mock.gcode_state = "FINISH"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
+    assert isinstance(printer.current_state, IdleState)
+
+    print_job_mock.gcode_state = "FAILED"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
     assert isinstance(printer.current_state, IdleState)
 
 
-def test_print_finished(printer: BambuVirtualPrinter):
+def test_printer_info_check(printer: BambuVirtualPrinter):
+    printer.write(b"M27\n")  # printer get info
+    printer.flush()
+
+    result = printer.readlines()
+    assert result[-1] == b"ok"
+    assert isinstance(printer.current_state, IdleState)
+
+
+def test_abort_print(printer: BambuVirtualPrinter):
+    printer.write(b"M26\n")  # GCode for aborting the print
+    printer.flush()
+
+    result = printer.readlines()
+    assert result[-1] == b"ok"
+    assert isinstance(printer.current_state, IdleState)
+
+
+def test_regular_move(printer: BambuVirtualPrinter, bambu_client_mock):
     gcode = b"G28\nG1 X10 Y10\n"
     printer.write(gcode)
-    result = printer.readline()
-    assert isinstance(printer.current_state, PrintFinishedState)
+    printer.flush()
+    result = printer.readlines()
+    assert result[-1] == b"ok"
+
+    gcode_command = pybambu.commands.SEND_GCODE_TEMPLATE
+    gcode_command["print"]["param"] = "G28\n"
+    bambu_client_mock.publish.assert_called_with(gcode_command)
+
+    gcode_command["print"]["param"] = "G1 X10 Y10\n"
+    bambu_client_mock.publish.assert_called_with(gcode_command)
