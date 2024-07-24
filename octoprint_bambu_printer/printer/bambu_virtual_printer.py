@@ -67,7 +67,7 @@ class BambuVirtualPrinter:
         self._running = True
         self._printer_thread = threading.Thread(
             target=self._printer_worker,
-            name="octoprint.plugins.bambu_printer.printer_worker",
+            name="octoprint.plugins.bambu_printer.printer_state",
         )
         self._state_change_queue = queue.Queue()
 
@@ -229,7 +229,7 @@ class BambuVirtualPrinter:
         bambu_client.on_connect = self.on_connect(bambu_client.on_connect)
         bambu_client.connect(callback=self.new_update)
         self._log.info(f"bambu connection status: {bambu_client.connected}")
-        self._serial_io.sendOk()
+        self.sendOk()
         self._bambu_client = bambu_client
 
     def __str__(self):
@@ -304,11 +304,21 @@ class BambuVirtualPrinter:
 
     ##~~ command implementations
 
+    @gcode_executor.register_no_data("M21")
+    def _sd_status(self) -> None:
+        self.sendIO("SD card ok")
+
     @gcode_executor.register("M23")
     def _select_sd_file(self, data: str) -> bool:
         filename = data.split(maxsplit=1)[1].strip()
         self._list_sd()
-        return self.file_system.select_file(filename)
+        if self.file_system.select_file(filename):
+            assert self.file_system.selected_file is not None
+            self.sendIO(
+                f"File opened: {self.file_system.selected_file.file_name}  "
+                f"Size: {self.file_system.selected_file.size}"
+            )
+            self.sendIO("File selected")
 
     @gcode_executor.register("M26")
     def _set_sd_position(self, data: str) -> bool:
@@ -335,6 +345,7 @@ class BambuVirtualPrinter:
             else:
                 self._sdstatus_reporter = None
 
+        self.update_print_job_info()
         self.report_print_job_status()
         return True
 
@@ -350,8 +361,8 @@ class BambuVirtualPrinter:
         return self._processTemperatureQuery()
 
     # noinspection PyUnusedLocal
-    @gcode_executor.register("M115")
-    def _report_firmware_info(self, data: str) -> bool:
+    @gcode_executor.register_no_data("M115")
+    def _report_firmware_info(self) -> bool:
         self.sendIO("Bambu Printer Integration")
         self.sendIO("Cap:EXTENDED_M20:1")
         self.sendIO("Cap:LFN_WRITE:1")
@@ -412,7 +423,7 @@ class BambuVirtualPrinter:
         self._log.debug(f"processing gcode {gcode} command = {full_command}")
         handled = self.gcode_executor.execute(self, gcode, full_command)
         if handled:
-            self._serial_io.sendOk()
+            self.sendOk()
             return
 
         # post gcode to printer otherwise
@@ -421,7 +432,7 @@ class BambuVirtualPrinter:
             GCODE_COMMAND["print"]["param"] = full_command + "\n"
             if self.bambu_client.publish(GCODE_COMMAND):
                 self._log.info("command sent successfully")
-                self._serial_io.sendOk()
+                self.sendOk()
 
     @gcode_executor.register_no_data("M112")
     def _shutdown(self):
@@ -432,8 +443,8 @@ class BambuVirtualPrinter:
         self._serial_io.close()
         return True
 
-    @gcode_executor.register_no_data("M20")
-    def _list_sd(self):
+    @gcode_executor.register("M20")
+    def _list_sd(self, data: str = ""):
         self.sendIO("Begin file list")
         for item in map(lambda f: f.get_log_info(), self.file_system.get_all_files()):
             self.sendIO(item)
@@ -464,7 +475,7 @@ class BambuVirtualPrinter:
         else:
             self.sendIO("Not SD printing")
 
-    def _generateTemperatureOutput(self) -> str:
+    def _create_temperature_message(self) -> str:
         template = "{heater}:{actual:.2f}/ {target:.2f}"
         temps = collections.OrderedDict()
         temps["T"] = (self._telemetry.temp[0], self._telemetry.targetTemp[0])
@@ -487,7 +498,7 @@ class BambuVirtualPrinter:
     def _processTemperatureQuery(self) -> bool:
         # includeOk = not self._okBeforeCommandOutput
         if self.bambu_client.connected:
-            output = self._generateTemperatureOutput()
+            output = self._create_temperature_message()
             self.sendIO(output)
             return True
         else:

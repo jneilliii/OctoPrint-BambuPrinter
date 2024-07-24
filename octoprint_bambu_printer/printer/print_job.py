@@ -17,4 +17,4 @@ class PrintJob:
 
     @progress.setter
     def progress(self, value):
-        self.file_position = int(self.file_info.size * ((value + 1) / 100))
+        self.file_position = int(self.file_info.size * value / 100)

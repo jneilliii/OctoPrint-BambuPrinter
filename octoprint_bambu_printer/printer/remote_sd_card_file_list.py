@@ -77,18 +77,14 @@ class RemoteSDCardFileList:
 
             yield file_info
             existing_files.append(file_info.file_name)
+            existing_files.append(file_info.dosname)
 
     def _get_existing_files_info(self):
         ftp = self._connect_ftps_server()
 
         file_list = []
-        file_list.extend(ftp.list_files("", ".3mf") or [])
-        file_list.extend(
-            [
-                (Path("cache/") / f).as_posix()
-                for f in (ftp.list_files("cache/", ".3mf") or [])
-            ]
-        )
+        file_list.extend(ftp.list_files("", ".3mf"))
+        file_list.extend(ftp.list_files("cache/", ".3mf"))
 
         existing_files = []
         return list(self._scan_ftp_file_list(ftp, file_list, existing_files))
@@ -112,7 +108,7 @@ class RemoteSDCardFileList:
 
     def get_all_files(self):
         self._update_existing_files_info()
-        self._logger.debug(f"_getSdFiles return: {self._file_data_cache}")
+        self._logger.debug(f"get_all_files return: {self._file_data_cache}")
         return list(self._file_data_cache.values())
 
     def _update_existing_files_info(self):
@@ -124,7 +120,9 @@ class RemoteSDCardFileList:
 
     def _get_cached_data_by_suffix(self, file_stem: str, allowed_suffixes: list[str]):
         for suffix in allowed_suffixes:
-            file_data = self._get_cached_file_data(f"{file_stem}{suffix}")
+            file_data = self._get_cached_file_data(
+                Path(file_stem).with_suffix(suffix).as_posix()
+            )
             if file_data is not None:
                 return file_data
         return None
@@ -154,9 +152,6 @@ class RemoteSDCardFileList:
             return True
 
         self._selected_file_info = file_info
-        self._logger.info(
-            f"File opened: {self._selected_file_info.file_name}  Size: {self._selected_file_info.size}"
-        )
         return True
 
     def delete_file(self, file_path: str) -> None:

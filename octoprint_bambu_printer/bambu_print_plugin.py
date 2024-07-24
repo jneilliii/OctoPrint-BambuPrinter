@@ -1,5 +1,6 @@
 from __future__ import absolute_import, annotations
 import os
+from pathlib import Path
 import threading
 import time
 import flask
@@ -195,17 +196,14 @@ class BambuPrintPlugin(
                         f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True
                     )
                     if self._settings.get(["device_type"]) in ["X1", "X1C"]:
-                        timelapse_file_list = ftp.list_files("timelapse/", ".mp4") or []
+                        timelapse_file_list = ftp.list_files("timelapse/", ".mp4")
                     else:
-                        timelapse_file_list = ftp.list_files("timelapse/", ".avi") or []
+                        timelapse_file_list = ftp.list_files("timelapse/", ".avi")
                     for entry in timelapse_file_list:
-                        if entry.startswith("/"):
-                            filename = entry[1:].replace("timelapse/", "")
-                        else:
-                            filename = entry.replace("timelapse/", "")
-                        filesize = ftp.ftps_session.size(f"timelapse/{filename}")
+                        filename = entry.name
+                        filesize = ftp.ftps_session.size(entry.as_posix())
                         date_str = ftp.ftps_session.sendcmd(
-                            f"MDTM timelapse/{filename}"
+                            f"MDTM {entry.as_posix()}"
                         ).replace("213 ", "")
                         filedate = (
                             datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S")

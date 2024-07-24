@@ -26,6 +26,7 @@ wrapper for FTPS server interactions
 
 import ftplib
 import os
+from pathlib import Path
 import socket
 import ssl
 from typing import Optional, Union, List
@@ -33,6 +34,7 @@ from typing import Optional, Union, List
 from contextlib import redirect_stdout
 import io
 import re
+
 
 class ImplicitTLS(ftplib.FTP_TLS):
     """ftplib.FTP_TLS sub-class to support implicit SSL FTPS"""
@@ -57,9 +59,9 @@ class ImplicitTLS(ftplib.FTP_TLS):
         conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
 
         if self._prot_p:
-            conn = self.context.wrap_socket(conn,
-                                            server_hostname=self.host,
-                                            session=self.sock.session)  # this is the fix
+            conn = self.context.wrap_socket(
+                conn, server_hostname=self.host, session=self.sock.session
+            )  # this is the fix
         return conn, size
 
 
@@ -76,12 +78,12 @@ class IoTFTPSClient:
     welcome: str
 
     def __init__(
-            self,
-            ftps_host: str,
-            ftps_port: Optional[int] = 21,
-            ftps_user: Optional[str] = "",
-            ftps_pass: Optional[str] = "",
-            ssl_implicit: Optional[bool] = False,
+        self,
+        ftps_host: str,
+        ftps_port: Optional[int] = 21,
+        ftps_user: Optional[str] = "",
+        ftps_pass: Optional[str] = "",
+        ssl_implicit: Optional[bool] = False,
     ) -> None:
         self.ftps_host = ftps_host
         self.ftps_port = ftps_port
@@ -106,7 +108,8 @@ class IoTFTPSClient:
         self.ftps_session.set_debuglevel(0)
 
         self.welcome = self.ftps_session.connect(
-            host=self.ftps_host, port=self.ftps_port)
+            host=self.ftps_host, port=self.ftps_port
+        )
 
         if self.ftps_user and self.ftps_pass:
             self.ftps_session.login(user=self.ftps_user, passwd=self.ftps_pass)
@@ -137,7 +140,7 @@ class IoTFTPSClient:
             # Taken from ftplib.storbinary but with custom ssl handling
             # due to the shitty bambu p1p ftps server TODO fix properly.
             with open(source, "rb") as fp:
-                self.ftps_session.voidcmd('TYPE I')
+                self.ftps_session.voidcmd("TYPE I")
 
                 with self.ftps_session.transfercmd(f"STOR {dest}", rest) as conn:
                     while 1:
@@ -152,7 +155,9 @@ class IoTFTPSClient:
                             callback(buf)
 
                     # shutdown ssl layer
-                    if ftplib._SSLSocket is not None and isinstance(conn, ftplib._SSLSocket):
+                    if ftplib._SSLSocket is not None and isinstance(
+                        conn, ftplib._SSLSocket
+                    ):
                         # Yeah this is suposed to be conn.unwrap
                         # But since we operate in prot p mode
                         # we can close the connection always.
@@ -185,19 +190,24 @@ class IoTFTPSClient:
     def mkdir(self, path: str) -> str:
         return self.ftps_session.mkd(path)
 
-    def list_files(self, path: str, file_pattern: Optional[str] = None) -> Union[List[str], None]:
+    def list_files(self, list_path: str, extensions: str | list[str] | None = None):
         """list files under a path inside the FTPS server"""
+
+        if extensions is None:
+            _extension_acceptable = lambda p: True
+        else:
+            if isinstance(extensions, str):
+                extensions = [extensions]
+            _extension_acceptable = lambda p: any(s in p.suffixes for s in extensions)
+
         try:
-            files = self.ftps_session.nlst(path)
-            if not files:
-                return
-            if file_pattern:
-                return [f for f in files if file_pattern in f]
-            return files
+            list_result = self.ftps_session.nlst(list_path) or []
+            for file_name in list_result:
+                path = Path(list_path) / file_name
+                if _extension_acceptable(path):
+                    yield path
         except Exception as ex:
             print(f"unexpected exception occurred: {ex}")
-            pass
-        return
 
     def list_files_ex(self, path: str) -> Union[list[str], None]:
         """list files under a path inside the FTPS server"""
@@ -208,7 +218,8 @@ class IoTFTPSClient:
             s = f.getvalue()
             files = []
             for row in s.split("\n"):
-                if len(row) <= 0: continue
+                if len(row) <= 0:
+                    continue
 
                 attribs = row.split(" ")
 
@@ -219,7 +230,7 @@ class IoTFTPSClient:
                 else:
                     name = attribs[len(attribs) - 1]
 
-                file = ( attribs[0], name )
+                file = (attribs[0], name)
                 files.append(file)
             return files
         except Exception as ex:

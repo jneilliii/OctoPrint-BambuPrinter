@@ -36,7 +36,6 @@ class PrintingState(APrinterState):
         self._start_worker_thread()
 
     def finalize(self):
-
         if self._sd_printing_thread is not None and self._sd_printing_thread.is_alive():
             self._is_printing = False
             self._sd_printing_thread.join()
@@ -82,7 +81,8 @@ class PrintingState(APrinterState):
         if self._printer.bambu_client.connected:
             if self._printer.bambu_client.publish(pybambu.commands.STOP):
                 self._log.info("print cancelled")
-                self._printer.change_state(self._printer._state_finished)
+                self._finish_print()
+                self._printer.change_state(self._printer._state_idle)
             else:
                 self._log.info("print cancel failed")
 
@@ -91,5 +91,6 @@ class PrintingState(APrinterState):
             self._log.debug(
                 f"SD File Print finishing: {self._printer.current_print_job.file_info.file_name}"
             )
+            self._printer.sendIO("Done printing file")
 
         self._printer.change_state(self._printer._state_idle)

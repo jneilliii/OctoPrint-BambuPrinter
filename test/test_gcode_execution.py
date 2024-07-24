@@ -107,7 +107,10 @@ def ftps_session_mock(files_info_ftp):
                     filter(lambda f: Path(f).parent == Path("."), all_files)
                 ),
                 ("cache/", ".3mf"): list(
-                    filter(lambda f: Path(f).parent == Path("cache/"), all_files)
+                    map(
+                        lambda f: Path(f).name,
+                        filter(lambda f: Path(f).parent == Path("cache/"), all_files),
+                    )
                 ),
             }
         )
@@ -164,7 +167,7 @@ def printer(
         pass
 
     BambuVirtualPrinter._create_client_connection_async = _mock_connection
-    serial_obj = BambuVirtualPrinter(
+    printer_test = BambuVirtualPrinter(
         settings,
         profile_manager,
         data_folder=output_test_folder,
@@ -172,9 +175,11 @@ def printer(
         read_timeout=0.01,
         faked_baudrate=115200,
     )
-    serial_obj._bambu_client = bambu_client_mock
-    yield serial_obj
-    serial_obj.close()
+    printer_test._bambu_client = bambu_client_mock
+    printer_test.flush()
+    printer_test.readlines()
+    yield printer_test
+    printer_test.close()
 
 
 def test_initial_state(printer: BambuVirtualPrinter):
@@ -206,7 +211,8 @@ def test_non_existing_file_not_selected(printer: BambuVirtualPrinter):
     printer.write(b"M23 non_existing.3mf\n")
     printer.flush()
     result = printer.readlines()
-    assert result[0] == b"ok"
+    assert result[-2] != b"File selected"
+    assert result[-1] == b"ok"
     assert printer.file_system.selected_file is None
 
 
@@ -220,7 +226,8 @@ def test_print_started_with_selected_file(printer: BambuVirtualPrinter, print_jo
     printer.write(b"M23 print.3mf\n")
     printer.flush()
     result = printer.readlines()
-    assert result[0] == b"ok"
+    assert result[-2] == b"File selected"
+    assert result[-1] == b"ok"
 
     assert printer.file_system.selected_file is not None
     assert printer.file_system.selected_file.file_name == "print.3mf"

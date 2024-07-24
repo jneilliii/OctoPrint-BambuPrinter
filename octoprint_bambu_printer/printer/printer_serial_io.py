@@ -27,7 +27,7 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
         write_timeout=10.0,
     ) -> None:
         super().__init__(
-            name="octoprint.plugins.bambu_printer.serial_io_thread", daemon=True
+            name="octoprint.plugins.bambu_printer.printer_worker", daemon=True
         )
         self._handle_command_callback = handle_command_callback
         self._settings = settings
@@ -115,8 +115,8 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
                 return 0
 
             try:
-                self.input_bytes.put(data, timeout=self._write_timeout)
                 self._log.debug(f"<<< {u_data}")
+                self.input_bytes.put(data, timeout=self._write_timeout)
                 return len(data)
             except queue.Full:
                 self._log.error(
