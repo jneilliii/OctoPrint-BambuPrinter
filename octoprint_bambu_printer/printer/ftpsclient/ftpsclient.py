@@ -24,6 +24,7 @@ SOFTWARE.
 wrapper for FTPS server interactions
 """
 
+from __future__ import annotations
 import ftplib
 import os
 from pathlib import Path
