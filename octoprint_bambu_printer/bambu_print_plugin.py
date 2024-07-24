@@ -65,7 +65,7 @@ class BambuPrintPlugin(
             "bed_leveling": True,
             "flow_cali": False,
             "vibration_cali": True,
-            "layer_inspect": True,
+            "layer_inspect": False,
             "use_ams": False,
             "local_mqtt": True,
             "region": "",
