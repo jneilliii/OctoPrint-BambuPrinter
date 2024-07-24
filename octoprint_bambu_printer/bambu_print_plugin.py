@@ -36,8 +36,6 @@ class BambuPrintPlugin(
     octoprint.plugin.BlueprintPlugin,
 ):
     _logger: logging.Logger
-    _printer: octoprint.printer.PrinterInterface
-    _settings: octoprint.settings.Settings
     _plugin_manager: octoprint.plugin.PluginManager
 
     def get_assets(self):

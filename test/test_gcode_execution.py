@@ -1,4 +1,7 @@
 from __future__ import annotations
+from unittest.mock import MagicMock
+
+import octoprint.settings
 
 from octoprint_bambu_printer.bambu_print_plugin import BambuPrintPlugin
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
@@ -12,10 +15,20 @@ from pytest import fixture
 
 
 @fixture
-def printer():
-    printer = BambuPrintPlugin().virtual_printer_factory(None, 5000, 115200, 5)
+def plugin():
+    plugin = BambuPrintPlugin()
+    plugin._settings = MagicMock()
+    plugin._settings.get(["serial"]).return_value = "login"
+    plugin._settings.get(["access_code"]).return_value = "token"
+    plugin._settings.get(["host"]).return_value = "192.168.0.20"
+    plugin._settings.get_plugin_logfile_path(["host"]).return_value = "./test_log.log"
+    return plugin
+
+
+@fixture
+def printer(plugin):
+    printer = plugin.virtual_printer_factory(None, "BAMBU", 115200, 5)
     assert printer is not None
-    printer._bambu_client
     return printer
 
 
