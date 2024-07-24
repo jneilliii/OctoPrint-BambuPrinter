@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import asdict, dataclass
 import datetime
 import itertools
@@ -8,11 +10,10 @@ import logging.handlers
 from octoprint.util import get_dos_filename
 from octoprint.util.files import unix_timestamp_to_m20_timestamp
 
-
 from .ftpsclient import IoTFTPSClient
 
 
-@dataclass
+@dataclass(frozen=True)
 class FileInfo:
     dosname: str
     path: Path
@@ -36,10 +37,16 @@ class RemoteSDCardFileList:
         self._settings = settings
         self._file_alias_cache = {}
         self._file_data_cache = {}
-        self._selectedFilePath = None
-        self._selectedSdFileSize = 0
-        self._selectedSdFilePos = 0
+        self._selected_file_info: FileInfo | None = None
         self._logger = logging.getLogger("octoprint.plugins.bambu_printer.BambuPrinter")
+
+    @property
+    def selected_file(self):
+        return self._selected_file_info
+
+    @property
+    def has_selected_file(self):
+        return self._selected_file_info is not None
 
     def _get_ftp_file_info(
         self, ftp: IoTFTPSClient, ftp_path, file_path: Path, existing_files: list[str]
@@ -133,14 +140,18 @@ class RemoteSDCardFileList:
                 self._logger.error(f"{file_name} open failed")
                 return False
 
-        if self._selectedFilePath == file_info.path and check_already_open:
+        if (
+            self._selected_file_info is not None
+            and self._selected_file_info.path == file_info.path
+            and check_already_open
+        ):
             return True
 
-        self._selectedFilePath = file_info.path
-        self._selectedSdFileSize = file_info.size
+        self._selected_file_info = file_info
         self._logger.info(
-            f"File opened: {file_info.file_name}  Size: {self._selectedSdFileSize}"
+            f"File opened: {self._selected_file_info.file_name}  Size: {self._selected_file_info.size}"
         )
+        return True
 
     def delete_file(self, file_path: str) -> None:
         host = self._settings.get(["host"])
