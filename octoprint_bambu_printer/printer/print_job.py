@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from octoprint_bambu_printer.printer.remote_sd_card_file_list import FileInfo
+from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import (
+    FileInfo,
+)
 
 
 @dataclass

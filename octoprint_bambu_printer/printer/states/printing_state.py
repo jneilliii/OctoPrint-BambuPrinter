@@ -64,7 +64,7 @@ class PrintingState(APrinterState):
     def update_print_job_info(self):
         print_job_info = self._printer.bambu_client.get_device().print_job
         task_name: str = print_job_info.subtask_name
-        project_file_info = self._printer.file_system.get_data_by_suffix(
+        project_file_info = self._printer.file_system.project_files.get_file_by_suffix(
             task_name, [".3mf", ".gcode.3mf"]
         )
         if project_file_info is None:

@@ -1,10 +1,9 @@
 from __future__ import absolute_import, annotations
-import os
 from pathlib import Path
 import threading
-import time
+from time import perf_counter
+from contextlib import contextmanager
 import flask
-import datetime
 import logging.handlers
 from urllib.parse import quote as urlquote
 
@@ -13,7 +12,7 @@ import octoprint.server
 import octoprint.plugin
 from octoprint.events import Events
 import octoprint.settings
-from octoprint.util import get_formatted_size, get_formatted_datetime, is_hidden_path
+from octoprint.util import is_hidden_path
 from octoprint.server.util.flask import no_firstrun_access
 from octoprint.server.util.tornado import (
     LargeResponseHandler,
@@ -24,8 +23,16 @@ from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
 
 from pybambu import BambuCloud
 
-from .printer.ftpsclient.ftpsclient import IoTFTPSClient
+from .printer.file_system.bambu_timelapse_file_info import (
+    BambuTimelapseFileInfo,
+)
 from .printer.bambu_virtual_printer import BambuVirtualPrinter
+
+
+@contextmanager
+def measure_elapsed():
+    start = perf_counter()
+    yield lambda: perf_counter() - start
 
 
 class BambuPrintPlugin(
@@ -36,6 +43,7 @@ class BambuPrintPlugin(
     octoprint.plugin.SimpleApiPlugin,
     octoprint.plugin.BlueprintPlugin,
 ):
+    _printer: BambuVirtualPrinter
     _logger: logging.Logger
     _plugin_manager: octoprint.plugin.PluginManager
 
@@ -120,24 +128,16 @@ class BambuPrintPlugin(
         sd_upload_started(filename, filename)
 
         def process():
-            host = self._settings.get(["host"])
-            access_code = self._settings.get(["access_code"])
-            elapsed = time.monotonic()
-            try:
-                ftp = IoTFTPSClient(
-                    f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True
-                )
-                if ftp.upload_file(path, f"{filename}"):
-                    elapsed = time.monotonic() - elapsed
-                    sd_upload_succeeded(filename, filename, elapsed)
-                    # remove local file after successful upload to Bambu
-                    # self._file_manager.remove_file("local", filename)
-                else:
-                    raise Exception("upload failed")
-            except Exception as e:
-                elapsed = time.monotonic() - elapsed
-                sd_upload_failed(filename, filename, elapsed)
-                self._logger.debug(f"Error uploading file {filename}")
+            with measure_elapsed() as get_elapsed:
+                try:
+                    with self._printer.file_system.get_ftps_client() as ftp:
+                        if ftp.upload_file(path, f"{filename}"):
+                            sd_upload_succeeded(filename, filename, get_elapsed())
+                        else:
+                            raise Exception("upload failed")
+                except Exception as e:
+                    sd_upload_failed(filename, filename, get_elapsed())
+                    self._logger.exception(e)
 
         thread = threading.Thread(target=process)
         thread.daemon = True
@@ -188,49 +188,13 @@ class BambuPrintPlugin(
         if flask.request.path.startswith("/api/timelapse"):
 
             def process():
-                host = self._settings.get(["host"])
-                access_code = self._settings.get(["access_code"])
                 return_file_list = []
-                try:
-                    ftp = IoTFTPSClient(
-                        f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True
-                    )
-                    if self._settings.get(["device_type"]) in ["X1", "X1C"]:
-                        timelapse_file_list = ftp.list_files("timelapse/", ".mp4")
-                    else:
-                        timelapse_file_list = ftp.list_files("timelapse/", ".avi")
-                    for entry in timelapse_file_list:
-                        filename = entry.name
-                        filesize = ftp.ftps_session.size(entry.as_posix())
-                        date_str = ftp.ftps_session.sendcmd(
-                            f"MDTM {entry.as_posix()}"
-                        ).replace("213 ", "")
-                        filedate = (
-                            datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S")
-                            .replace(tzinfo=datetime.timezone.utc)
-                            .timestamp()
-                        )
-                        return_file_list.append(
-                            {
-                                "bytes": filesize,
-                                "date": get_formatted_datetime(
-                                    datetime.datetime.fromtimestamp(filedate)
-                                ),
-                                "name": filename,
-                                "size": get_formatted_size(filesize),
-                                "thumbnail": "/plugin/bambu_printer/thumbnail/"
-                                + filename.replace(".mp4", ".jpg").replace(
-                                    ".avi", ".jpg"
-                                ),
-                                "timestamp": filedate,
-                                "url": f"/plugin/bambu_printer/timelapse/{filename}",
-                            }
-                        )
-                    self._plugin_manager.send_plugin_message(
-                        self._identifier, {"files": return_file_list}
-                    )
-                except Exception as e:
-                    self._logger.debug(f"Error getting timelapse files: {e}")
+                for file_info in self._printer.file_system.get_all_timelapse_files():
+                    timelapse_info = BambuTimelapseFileInfo.from_file_info(file_info)
+                    return_file_list.append(timelapse_info.to_dict())
+                self._plugin_manager.send_plugin_message(
+                    self._identifier, {"files": return_file_list}
+                )
 
             thread = threading.Thread(target=process)
             thread.daemon = True
@@ -239,22 +203,24 @@ class BambuPrintPlugin(
     def _hook_octoprint_server_api_before_request(self, *args, **kwargs):
         return [self.get_timelapse_file_list]
 
+    def _download_file(self, file_name: str, source_path: str):
+        destination = Path(self.get_plugin_data_folder()) / file_name
+        if destination.exists():
+            return destination
+
+        with self._printer.file_system.get_ftps_client() as ftp:
+            ftp.download_file(
+                source=(Path(source_path) / file_name).as_posix(),
+                dest=destination.as_posix(),
+            )
+        return destination
+
     @octoprint.plugin.BlueprintPlugin.route("/timelapse/<filename>", methods=["GET"])
     @octoprint.server.util.flask.restricted_access
     @no_firstrun_access
     @Permissions.TIMELAPSE_DOWNLOAD.require(403)
     def downloadTimelapse(self, filename):
-        dest_filename = os.path.join(self.get_plugin_data_folder(), filename)
-        host = self._settings.get(["host"])
-        access_code = self._settings.get(["access_code"])
-        if not os.path.exists(dest_filename):
-            ftp = IoTFTPSClient(
-                f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True
-            )
-            download_result = ftp.download_file(
-                source=f"timelapse/{filename}",
-                dest=dest_filename,
-            )
+        self._download_file(filename, "timelapse/")
         return flask.redirect(
             "/plugin/bambu_printer/download/timelapse/" + urlquote(filename), code=302
         )
@@ -264,17 +230,7 @@ class BambuPrintPlugin(
     @no_firstrun_access
     @Permissions.TIMELAPSE_DOWNLOAD.require(403)
     def downloadThumbnail(self, filename):
-        dest_filename = os.path.join(self.get_plugin_data_folder(), filename)
-        host = self._settings.get(["host"])
-        access_code = self._settings.get(["access_code"])
-        if not os.path.exists(dest_filename):
-            ftp = IoTFTPSClient(
-                f"{host}", 990, "bblp", f"{access_code}", ssl_implicit=True
-            )
-            download_result = ftp.download_file(
-                source=f"timelapse/thumbnail/{filename}",
-                dest=dest_filename,
-            )
+        self._download_file(filename, "timelapse/thumbnail/")
         return flask.redirect(
             "/plugin/bambu_printer/download/thumbnail/" + urlquote(filename), code=302
         )

@@ -5,14 +5,12 @@ import logging
 import queue
 import re
 import threading
-import time
 import traceback
+from types import TracebackType
 from typing import Callable
 
 from octoprint.util import to_bytes, to_unicode
 from serial import SerialTimeoutException
-
-from .char_counting_queue import CharCountingQueue
 
 
 class PrinterSerialIO(threading.Thread, BufferedIOBase):
@@ -80,7 +78,10 @@ class PrinterSerialIO(threading.Thread, BufferedIOBase):
                 self._error_detected = e
                 self.input_bytes.task_done()
                 self._clearQueue(self.input_bytes)
-                self._log.info("\n".join(traceback.format_exception(e)[-50:]))
+                self._log.info(
+                    "\n".join(traceback.format_exception_only(type(e), e)[-50:])
+                )
+                self._running = False
 
         self._log.debug("Closing IO read loop")
 

@@ -22,7 +22,7 @@ from .states.paused_state import PausedState
 from .states.printing_state import PrintingState
 
 from .gcode_executor import GCodeExecutor
-from .remote_sd_card_file_list import RemoteSDCardFileList
+from .file_system.remote_sd_card_file_list import RemoteSDCardFileList
 
 
 AMBIENT_TEMPERATURE: float = 21.3
@@ -293,7 +293,7 @@ class BambuVirtualPrinter:
     def _select_sd_file(self, data: str) -> bool:
         filename = data.split(maxsplit=1)[1].strip()
         self._list_sd()
-        if not self.file_system.select_file(filename):
+        if not self.file_system.select_project_file(filename):
             return False
 
         assert self.file_system.selected_file is not None
@@ -431,7 +431,9 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M20")
     def _list_sd(self, data: str = ""):
         self.sendIO("Begin file list")
-        for item in map(lambda f: f.get_log_info(), self.file_system.get_all_files()):
+        for item in map(
+            lambda f: f.get_log_info(), self.file_system.get_all_project_files()
+        ):
             self.sendIO(item)
         self.sendIO("End file list")
         return True

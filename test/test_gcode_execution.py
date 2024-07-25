@@ -1,20 +1,14 @@
 from __future__ import annotations
-from collections.abc import Callable
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
-import time
 from typing import Any
-import unittest
-from unittest.mock import MagicMock, Mock
-import unittest.mock
+from unittest.mock import MagicMock
 
 import pybambu
 import pybambu.commands
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
-from octoprint_bambu_printer.printer.remote_sd_card_file_list import (
-    RemoteSDCardFileList,
-)
+from octoprint_bambu_printer.printer.file_system.ftps_client import IoTFTPSClient
 from octoprint_bambu_printer.printer.states.idle_state import IdleState
 from octoprint_bambu_printer.printer.states.paused_state import PausedState
 from octoprint_bambu_printer.printer.states.printing_state import PrintingState
@@ -88,40 +82,31 @@ def files_info_ftp():
 
 @fixture
 def ftps_session_mock(files_info_ftp):
-    with unittest.mock.patch(
-        "octoprint_bambu_printer.printer.ftpsclient.ftpsclient.IoTFTPSClient"
-    ) as ftps_client_mock:
-        ftps_session = MagicMock()
-        ftps_session.size.side_effect = DictGetter(
-            {file: info[0] for file, info in files_info_ftp.items()}
-        )
+    ftps_session = MagicMock()
+    ftps_session.size.side_effect = DictGetter(
+        {file: info[0] for file, info in files_info_ftp.items()}
+    )
 
-        ftps_session.sendcmd.side_effect = DictGetter(
-            {f"MDTM {file}": info[1] for file, info in files_info_ftp.items()}
-        )
+    ftps_session.sendcmd.side_effect = DictGetter(
+        {f"MDTM {file}": info[1] for file, info in files_info_ftp.items()}
+    )
 
-        all_files = list(files_info_ftp.keys())
-        file_registry = DictGetter(
-            {
-                ("", ".3mf"): list(
-                    filter(lambda f: Path(f).parent == Path("."), all_files)
-                ),
-                ("cache/", ".3mf"): list(
-                    map(
-                        lambda f: Path(f).name,
-                        filter(lambda f: Path(f).parent == Path("cache/"), all_files),
-                    )
-                ),
-            }
-        )
-        ftps_client_mock.list_files.side_effect = lambda folder, ext: file_registry(
-            (folder, ext)
-        )
-        ftps_client_mock.ftps_session = ftps_session
-        RemoteSDCardFileList._connect_ftps_server = MagicMock(
-            return_value=ftps_client_mock
-        )
-        yield
+    all_files = list(files_info_ftp.keys())
+    ftps_session.nlst.side_effect = DictGetter(
+        {
+            "": list(filter(lambda f: Path(f).parent == Path("."), all_files))
+            + ["Mock folder"],
+            "cache/": list(
+                map(
+                    lambda f: Path(f).name,
+                    filter(lambda f: Path(f).parent == Path("cache/"), all_files),
+                )
+            )
+            + ["Mock folder"],
+        }
+    )
+    IoTFTPSClient.open_ftps_session = MagicMock(return_value=ftps_session)
+    yield
 
 
 @fixture(scope="function")

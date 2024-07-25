@@ -25,12 +25,13 @@ wrapper for FTPS server interactions
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
 import ftplib
 import os
 from pathlib import Path
 import socket
 import ssl
-from typing import Optional, Union, List
+from typing import Generator, Union
 
 from contextlib import redirect_stdout
 import io
@@ -66,62 +67,14 @@ class ImplicitTLS(ftplib.FTP_TLS):
         return conn, size
 
 
-class IoTFTPSClient:
+@dataclass
+class IoTFTPSConnection:
     """iot ftps ftpsclient"""
 
-    ftps_host: str
-    ftps_port: int
-    ftps_user: str
-    ftps_pass: str
-    ssl_implicit: bool
-    ftps_session: Union[ftplib.FTP, ImplicitTLS]
-    last_error: Optional[str] = None
-    welcome: str
+    ftps_session: ftplib.FTP | ImplicitTLS
 
-    def __init__(
-        self,
-        ftps_host: str,
-        ftps_port: Optional[int] = 21,
-        ftps_user: Optional[str] = "",
-        ftps_pass: Optional[str] = "",
-        ssl_implicit: Optional[bool] = False,
-    ) -> None:
-        self.ftps_host = ftps_host
-        self.ftps_port = ftps_port
-        self.ftps_user = ftps_user
-        self.ftps_pass = ftps_pass
-        self.ssl_implicit = ssl_implicit
-        self.instantiate_ftps_session()
-
-    def __repr__(self) -> str:
-        return (
-            "IoT FTPS Client\n"
-            "--------------------\n"
-            f"host: {self.ftps_host}\n"
-            f"port: {self.ftps_port}\n"
-            f"user: {self.ftps_user}\n"
-            f"ssl: {self.ssl_implicit}"
-        )
-
-    def instantiate_ftps_session(self) -> None:
-        """init ftps_session based on input params"""
-        self.ftps_session = ImplicitTLS() if self.ssl_implicit else ftplib.FTP()
-        self.ftps_session.set_debuglevel(0)
-
-        self.welcome = self.ftps_session.connect(
-            host=self.ftps_host, port=self.ftps_port
-        )
-
-        if self.ftps_user and self.ftps_pass:
-            self.ftps_session.login(user=self.ftps_user, passwd=self.ftps_pass)
-        else:
-            self.ftps_session.login()
-
-        if self.ssl_implicit:
-            self.ftps_session.prot_p()
-
-    def disconnect(self) -> None:
-        """disconnect the current session from the ftps server"""
+    def close(self) -> None:
+        """close the current session from the ftps server"""
         self.ftps_session.close()
 
     def download_file(self, source: str, dest: str):
@@ -191,7 +144,9 @@ class IoTFTPSClient:
     def mkdir(self, path: str) -> str:
         return self.ftps_session.mkd(path)
 
-    def list_files(self, list_path: str, extensions: str | list[str] | None = None):
+    def list_files(
+        self, list_path: str, extensions: str | list[str] | None = None
+    ) -> Generator[Path]:
         """list files under a path inside the FTPS server"""
 
         if extensions is None:
@@ -238,3 +193,41 @@ class IoTFTPSClient:
             print(f"unexpected exception occurred: [{ex}]")
             pass
         return
+
+
+@dataclass
+class IoTFTPSClient:
+    ftps_host: str
+    ftps_port: int = 21
+    ftps_user: str = ""
+    ftps_pass: str = ""
+    ssl_implicit: bool = False
+    welcome: str = ""
+    _connection: IoTFTPSConnection | None = None
+
+    def __enter__(self):
+        session = self.open_ftps_session()
+        self._connection = IoTFTPSConnection(session)
+        return self._connection
+
+    def __exit__(self, type, value, traceback):
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+
+    def open_ftps_session(self) -> ftplib.FTP | ImplicitTLS:
+        """init ftps_session based on input params"""
+        ftps_session = ImplicitTLS() if self.ssl_implicit else ftplib.FTP()
+        ftps_session.set_debuglevel(0)
+
+        self.welcome = ftps_session.connect(host=self.ftps_host, port=self.ftps_port)
+
+        if self.ftps_user and self.ftps_pass:
+            ftps_session.login(user=self.ftps_user, passwd=self.ftps_pass)
+        else:
+            ftps_session.login()
+
+        if self.ssl_implicit:
+            ftps_session.prot_p()
+
+        return ftps_session
