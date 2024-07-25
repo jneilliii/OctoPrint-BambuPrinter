@@ -23,6 +23,10 @@ from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
 
 from pybambu import BambuCloud
 
+from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import (
+    RemoteSDCardFileList,
+)
+
 from .printer.file_system.bambu_timelapse_file_info import (
     BambuTimelapseFileInfo,
 )
@@ -43,9 +47,12 @@ class BambuPrintPlugin(
     octoprint.plugin.SimpleApiPlugin,
     octoprint.plugin.BlueprintPlugin,
 ):
-    _printer: BambuVirtualPrinter
     _logger: logging.Logger
     _plugin_manager: octoprint.plugin.PluginManager
+    _bambu_file_system: RemoteSDCardFileList
+
+    def on_settings_initialized(self):
+        self._bambu_file_system = RemoteSDCardFileList(self._settings)
 
     def get_assets(self):
         return {"js": ["js/bambu_printer.js"]}
@@ -130,7 +137,7 @@ class BambuPrintPlugin(
         def process():
             with measure_elapsed() as get_elapsed:
                 try:
-                    with self._printer.file_system.get_ftps_client() as ftp:
+                    with self._bambu_file_system.get_ftps_client() as ftp:
                         if ftp.upload_file(path, f"{filename}"):
                             sd_upload_succeeded(filename, filename, get_elapsed())
                         else:
@@ -189,7 +196,7 @@ class BambuPrintPlugin(
 
             def process():
                 return_file_list = []
-                for file_info in self._printer.file_system.get_all_timelapse_files():
+                for file_info in self._bambu_file_system.get_all_timelapse_files():
                     timelapse_info = BambuTimelapseFileInfo.from_file_info(file_info)
                     return_file_list.append(timelapse_info.to_dict())
                 self._plugin_manager.send_plugin_message(
@@ -208,7 +215,7 @@ class BambuPrintPlugin(
         if destination.exists():
             return destination
 
-        with self._printer.file_system.get_ftps_client() as ftp:
+        with self._bambu_file_system.get_ftps_client() as ftp:
             ftp.download_file(
                 source=(Path(source_path) / file_name).as_posix(),
                 dest=destination.as_posix(),
