@@ -102,13 +102,8 @@ class RemoteSDCardFileList:
         file_path: Path,
         existing_files: list[str] | None = None,
     ):
-        file_size = ftp.ftps_session.size(file_path.as_posix())
-        date_str = ftp.ftps_session.sendcmd(f"MDTM {file_path.as_posix()}").replace(
-            "213 ", ""
-        )
-        date = datetime.datetime.strptime(date_str, "%Y%m%d%H%M%S").replace(
-            tzinfo=datetime.timezone.utc
-        )
+        file_size = ftp.get_file_size(file_path.as_posix())
+        date = ftp.get_file_date(file_path.as_posix())
         file_name = file_path.name.lower()
         dosname = get_dos_filename(file_name, existing_filenames=existing_files).lower()
         return FileInfo(
@@ -128,10 +123,13 @@ class RemoteSDCardFileList:
             existing_files = []
 
         for entry in files:
-            file_info = self._get_ftp_file_info(ftp, entry, existing_files)
-            yield file_info
-            existing_files.append(file_info.file_name)
-            existing_files.append(file_info.dosname)
+            try:
+                file_info = self._get_ftp_file_info(ftp, entry, existing_files)
+                yield file_info
+                existing_files.append(file_info.file_name)
+                existing_files.append(file_info.dosname)
+            except Exception as e:
+                self._logger.exception(e, exc_info=False)
 
     def get_ftps_client(self):
         host = self._settings.get(["host"])

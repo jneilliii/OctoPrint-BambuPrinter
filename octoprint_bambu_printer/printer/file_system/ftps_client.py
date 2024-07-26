@@ -26,6 +26,7 @@ wrapper for FTPS server interactions
 
 from __future__ import annotations
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import ftplib
 import os
 from pathlib import Path
@@ -193,6 +194,28 @@ class IoTFTPSConnection:
             print(f"unexpected exception occurred: [{ex}]")
             pass
         return
+
+    def get_file_size(self, file_path: str):
+        try:
+            return self.ftps_session.size(file_path)
+        except Exception as e:
+            raise RuntimeError(
+                f'Cannot get file size for "{file_path}" due to error: {str(e)}'
+            )
+
+    def get_file_date(self, file_path: str) -> datetime:
+        try:
+            date_response = self.ftps_session.sendcmd(f"MDTM {file_path}").replace(
+                "213 ", ""
+            )
+            date = datetime.strptime(date_response, "%Y%m%d%H%M%S").replace(
+                tzinfo=timezone.utc
+            )
+            return date
+        except Exception as e:
+            raise RuntimeError(
+                f'Cannot get file date for "{file_path}" due to error: {str(e)}'
+            )
 
 
 @dataclass

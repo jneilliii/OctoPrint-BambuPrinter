@@ -10,6 +10,9 @@ import pybambu.commands
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
 from octoprint_bambu_printer.printer.file_system.file_info import FileInfo
 from octoprint_bambu_printer.printer.file_system.ftps_client import IoTFTPSClient
+from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import (
+    RemoteSDCardFileList,
+)
 from octoprint_bambu_printer.printer.states.idle_state import IdleState
 from octoprint_bambu_printer.printer.states.paused_state import PausedState
 from octoprint_bambu_printer.printer.states.printing_state import PrintingState
@@ -29,13 +32,14 @@ def log_test():
 
 
 class DictGetter:
-    def __init__(self, options: dict) -> None:
-        self._options: dict[str | tuple[str, ...], Any] = options
+    def __init__(self, options: dict, default_value=None) -> None:
+        self.options: dict[str | tuple[str, ...], Any] = options
+        self._default_value = default_value
 
     def __call__(self, key: str | list[str] | tuple[str, ...]):
         if isinstance(key, list):
             key = tuple(key)
-        return self._options.get(key, None)
+        return self.options.get(key, self._default_value)
 
 
 @fixture
@@ -184,6 +188,54 @@ def test_list_sd_card(printer: BambuVirtualPrinter):
     assert result[2].endswith(b'"print2.3mf"')
     assert result[3] == b"End file list"
     assert result[4] == b"ok"
+
+
+def test_list_ftp_paths_bambu_p1(settings, ftps_session_mock):
+    settings.get.side_effect.options[("device_type",)] = "P1S"
+    file_system = RemoteSDCardFileList(settings)
+
+    timelapse_files = ["timelapse/video.avi", "timelapse/video2.avi"]
+    ftps_session_mock.size.side_effect = DictGetter(
+        {file: 100 for file in timelapse_files}
+    )
+    ftps_session_mock.sendcmd.side_effect = DictGetter(
+        {
+            f"MDTM {file}": _ftp_date_format(datetime(2024, 5, 7))
+            for file in timelapse_files
+        }
+    )
+    ftps_session_mock.nlst.side_effect = DictGetter(
+        {"timelapse/": [Path(f).name for f in timelapse_files]}
+    )
+
+    timelapse_paths = list(map(Path, timelapse_files))
+    result_files = file_system.get_all_timelapse_files()
+    assert len(timelapse_files) == len(result_files) and all(
+        file_info.path in timelapse_paths for file_info in result_files
+    )
+
+
+def test_list_ftp_paths_bambu_x1(settings, ftps_session_mock):
+    settings.get.side_effect.options[("device_type",)] = "X1"
+    file_system = RemoteSDCardFileList(settings)
+
+    timelapse_files = ["timelapse/video.mp4", "timelapse/video2.mp4"]
+    ftps_session_mock.size.side_effect = DictGetter(
+        {file: 100 for file in timelapse_files}
+    )
+    ftps_session_mock.sendcmd.side_effect = DictGetter(
+        {
+            f"MDTM {file}": _ftp_date_format(datetime(2024, 5, 7))
+            for file in timelapse_files
+        }
+    )
+    ftps_session_mock.nlst.side_effect = DictGetter({"timelapse/": timelapse_files})
+
+    timelapse_paths = list(map(Path, timelapse_files))
+    result_files = file_system.get_all_timelapse_files()
+    assert len(timelapse_files) == len(result_files) and all(
+        file_info.path in timelapse_paths for file_info in result_files
+    )
 
 
 def test_cannot_start_print_without_file(printer: BambuVirtualPrinter):
@@ -360,29 +412,3 @@ def test_finished_print_job_reset_after_new_file_selected(
     assert printer.current_print_job is not None
     assert printer.current_print_job.file_info.file_name == "print2.3mf"
     assert printer.current_print_job.progress == 0
-
-
-def test_timelapse_paths_bambu_x1(printer: BambuVirtualPrinter, ftps_session_mock):
-    timelapse_files = ["timelapse/video.mp4", "timelapse/video2.avi"]
-    ftps_session_mock.size.side_effect = DictGetter(
-        {file: 100 for file in timelapse_files}
-    )
-    ftps_session_mock.sendcmd.side_effect = DictGetter(
-        {
-            f"MDTM {file}": _ftp_date_format(datetime(2024, 5, 7))
-            for file in timelapse_files
-        }
-    )
-    ftps_session_mock.nlst.side_effect = DictGetter(
-        {
-            "": ["timelapse"],
-            "timelapse/": timelapse_files,
-            "cache/": [],
-        }
-    )
-
-    timelapse_paths = list(map(Path, timelapse_files))
-    assert all(
-        file_info.path in timelapse_paths
-        for file_info in printer.file_system.get_all_timelapse_files()
-    )
