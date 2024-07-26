@@ -6,12 +6,8 @@ from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState
 
 class IdleState(APrinterState):
 
-    def init(self):
-        if self._printer.file_system.has_selected_file:
-            self.update_print_job_info()
-
     def start_new_print(self):
-        selected_file = self._printer.file_system.selected_file
+        selected_file = self._printer.selected_file
         if selected_file is None:
             self._log.warn("Cannot start print job if file was not selected")
             return
@@ -55,9 +51,3 @@ class IdleState(APrinterState):
         }
 
         return print_command
-
-    def update_print_job_info(self):
-        if self._printer.file_system.selected_file is not None:
-            self._printer.current_print_job = PrintJob(
-                self._printer.file_system.selected_file, 0
-            )

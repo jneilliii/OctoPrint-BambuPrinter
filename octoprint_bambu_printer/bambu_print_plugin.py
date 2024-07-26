@@ -21,6 +21,7 @@ from octoprint.server.util.tornado import (
 from octoprint.access.permissions import Permissions
 from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
 
+from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
 from pybambu import BambuCloud
 
 from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import (
@@ -50,9 +51,15 @@ class BambuPrintPlugin(
     _logger: logging.Logger
     _plugin_manager: octoprint.plugin.PluginManager
     _bambu_file_system: RemoteSDCardFileList
+    _timelapse_files_view: CachedFileView
 
     def on_settings_initialized(self):
         self._bambu_file_system = RemoteSDCardFileList(self._settings)
+        self._timelapse_files_view = CachedFileView(self._bambu_file_system)
+        if self._settings.get(["device_type"]) in ["X1", "X1C"]:
+            self._timelapse_files_view.with_filter("timelapse/", ".mp4")
+        else:
+            self._timelapse_files_view.with_filter("timelapse/", ".avi")
 
     def get_assets(self):
         return {"js": ["js/bambu_printer.js"]}
@@ -196,7 +203,7 @@ class BambuPrintPlugin(
 
             def process():
                 return_file_list = []
-                for file_info in self._bambu_file_system.get_all_timelapse_files():
+                for file_info in self._timelapse_files_view.get_all_info():
                     timelapse_info = BambuTimelapseFileInfo.from_file_info(file_info)
                     return_file_list.append(timelapse_info.to_dict())
                 self._plugin_manager.send_plugin_message(

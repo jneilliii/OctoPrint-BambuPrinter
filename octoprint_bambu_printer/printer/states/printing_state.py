@@ -27,7 +27,7 @@ class PrintingState(APrinterState):
 
     def init(self):
         self._is_printing = True
-        self._printer.file_system.remove_file_selection()
+        self._printer.remove_project_selection()
         self.update_print_job_info()
         self._start_worker_thread()
 
@@ -64,7 +64,7 @@ class PrintingState(APrinterState):
     def update_print_job_info(self):
         print_job_info = self._printer.bambu_client.get_device().print_job
         task_name: str = print_job_info.subtask_name
-        project_file_info = self._printer.file_system.project_files.get_file_by_suffix(
+        project_file_info = self._printer.project_files.get_file_by_suffix(
             task_name, [".3mf", ".gcode.3mf"]
         )
         if project_file_info is None:
@@ -74,6 +74,7 @@ class PrintingState(APrinterState):
 
         progress = print_job_info.print_percentage
         self._printer.current_print_job = PrintJob(project_file_info, progress)
+        self._printer.select_project_file(project_file_info.file_name)
 
     def pause_print(self):
         if self._printer.bambu_client.connected:
@@ -98,5 +99,6 @@ class PrintingState(APrinterState):
                 f"SD File Print finishing: {self._printer.current_print_job.file_info.file_name}"
             )
             self._printer.sendIO("Done printing file")
+            self._printer.current_print_job = None
 
         self._printer.change_state(self._printer._state_idle)

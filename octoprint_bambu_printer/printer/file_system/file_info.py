@@ -26,7 +26,7 @@ class FileInfo:
     def timestamp_m20(self) -> str:
         return unix_timestamp_to_m20_timestamp(int(self.timestamp))
 
-    def get_log_info(self) -> str:
+    def get_gcode_info(self) -> str:
         return f'{self.dosname} {self.size} {self.timestamp_m20} "{self.file_name}"'
 
     def to_dict(self):

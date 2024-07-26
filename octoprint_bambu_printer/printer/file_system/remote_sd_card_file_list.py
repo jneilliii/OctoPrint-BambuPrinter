@@ -17,68 +17,18 @@ class RemoteSDCardFileList:
 
     def __init__(self, settings) -> None:
         self._settings = settings
-        self._file_alias_cache = {}
-        self._file_data_cache = {}
         self._selected_project_file: FileInfo | None = None
         self._logger = logging.getLogger("octoprint.plugins.bambu_printer.BambuPrinter")
-        self._project_files_view = (
-            CachedFileView(self).with_filter("", ".3mf").with_filter("cache/", ".3mf")
-        )
-        self._timelapse_files_view = CachedFileView(self)
-        if self._settings.get(["device_type"]) in ["X1", "X1C"]:
-            self._timelapse_files_view.with_filter("timelapse/", ".mp4")
-        else:
-            self._timelapse_files_view.with_filter("timelapse/", ".avi")
 
-    @property
-    def selected_file(self):
-        return self._selected_project_file
-
-    @property
-    def has_selected_file(self):
-        return self._selected_project_file is not None
-
-    @property
-    def project_files(self):
-        return self._project_files_view
-
-    def remove_file_selection(self):
-        self._selected_project_file = None
-
-    def get_all_project_files(self):
-        self._project_files_view.update()
-        files = self._project_files_view.get_all_cached_info()
-        self._logger.debug(f"get project files return: {files}")
-        return files
-
-    def get_all_timelapse_files(self):
-        self._timelapse_files_view.update()
-        files = self._timelapse_files_view.get_all_cached_info()
-        self._logger.debug(f"get timelapse files return: {files}")
-        return files
-
-    def select_project_file(self, file_path: str) -> bool:
-        self._logger.debug(f"_selectSdFile: {file_path}")
-        file_name = Path(file_path).name
-        file_info = self._project_files_view.get_cached_file_data(file_name)
-        if file_info is None:
-            self._logger.error(f"{file_name} open failed")
-            return False
-
-        self._selected_project_file = file_info
-        return True
-
-    def delete_file(self, file_path: str) -> None:
-        file_info = self._project_files_view.get_cached_file_data(file_path)
-        if file_info is not None:
-            try:
-                with self.get_ftps_client() as ftp:
-                    if ftp.delete_file(str(file_info.path)):
-                        self._logger.debug(f"{file_path} deleted")
-                    else:
-                        raise RuntimeError(f"Deleting file {file_path} failed")
-            except Exception as e:
-                self._logger.exception(e)
+    def delete_file(self, file_path: Path) -> None:
+        try:
+            with self.get_ftps_client() as ftp:
+                if ftp.delete_file(str(file_path)):
+                    self._logger.debug(f"{file_path} deleted")
+                else:
+                    raise RuntimeError(f"Deleting file {file_path} failed")
+        except Exception as e:
+            self._logger.exception(e)
 
     def list_files(
         self,

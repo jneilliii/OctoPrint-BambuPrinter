@@ -3,10 +3,13 @@ from __future__ import annotations
 import collections
 from dataclasses import dataclass, field
 import math
+from pathlib import Path
 import queue
 import re
 import threading
 import time
+from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
+from octoprint_bambu_printer.printer.file_system.file_info import FileInfo
 from octoprint_bambu_printer.printer.print_job import PrintJob
 from pybambu import BambuClient, commands
 import logging
@@ -55,6 +58,11 @@ class BambuVirtualPrinter:
         read_timeout=5.0,
         faked_baudrate=115200,
     ):
+        self._settings = settings
+        self._printer_profile_manager = printer_profile_manager
+        self._faked_baudrate = faked_baudrate
+        self._data_folder = data_folder
+        self._last_hms_errors = None
         self._log = logging.getLogger("octoprint.plugins.bambu_printer.BambuPrinter")
 
         self._state_idle = IdleState(self)
@@ -85,12 +93,12 @@ class BambuVirtualPrinter:
         )
 
         self.file_system = RemoteSDCardFileList(settings)
-
-        self._settings = settings
-        self._printer_profile_manager = printer_profile_manager
-        self._faked_baudrate = faked_baudrate
-
-        self._last_hms_errors = None
+        self._selected_project_file: FileInfo | None = None
+        self._project_files_view = (
+            CachedFileView(self.file_system, on_update=self._list_cached_project_files)
+            .with_filter("", ".3mf")
+            .with_filter("cache/", ".3mf")
+        )
 
         self._serial_io.start()
         self._printer_thread.start()
@@ -116,6 +124,44 @@ class BambuVirtualPrinter:
     @current_print_job.setter
     def current_print_job(self, value):
         self._current_print_job = value
+
+    @property
+    def selected_file(self):
+        return self._selected_project_file
+
+    @property
+    def has_selected_file(self):
+        return self._selected_project_file is not None
+
+    @property
+    def timeout(self):
+        return self._serial_io._read_timeout
+
+    @timeout.setter
+    def timeout(self, value):
+        self._log.debug(f"Setting read timeout to {value}s")
+        self._serial_io._read_timeout = value
+
+    @property
+    def write_timeout(self):
+        return self._serial_io._write_timeout
+
+    @write_timeout.setter
+    def write_timeout(self, value):
+        self._log.debug(f"Setting write timeout to {value}s")
+        self._serial_io._write_timeout = value
+
+    @property
+    def port(self):
+        return "BAMBU"
+
+    @property
+    def baudrate(self):
+        return self._faked_baudrate
+
+    @property
+    def project_files(self):
+        return self._project_files_view
 
     def change_state(self, new_state: APrinterState):
         self._state_change_queue.put(new_state)
@@ -238,32 +284,6 @@ class BambuVirtualPrinter:
 
             self._serial_io.reset()
 
-    @property
-    def timeout(self):
-        return self._serial_io._read_timeout
-
-    @timeout.setter
-    def timeout(self, value):
-        self._log.debug(f"Setting read timeout to {value}s")
-        self._serial_io._read_timeout = value
-
-    @property
-    def write_timeout(self):
-        return self._serial_io._write_timeout
-
-    @write_timeout.setter
-    def write_timeout(self, value):
-        self._log.debug(f"Setting write timeout to {value}s")
-        self._serial_io._write_timeout = value
-
-    @property
-    def port(self):
-        return "BAMBU"
-
-    @property
-    def baudrate(self):
-        return self._faked_baudrate
-
     def write(self, data: bytes) -> int:
         return self._serial_io.write(data)
 
@@ -283,6 +303,22 @@ class BambuVirtualPrinter:
         self._serial_io.flush()
         self._wait_for_state_change()
 
+    ##~~ project file functions
+
+    def remove_project_selection(self):
+        self._selected_project_file = None
+
+    def select_project_file(self, file_path: str) -> bool:
+        self._log.debug(f"Select project file: {file_path}")
+        file_info = self._project_files_view.get_cached_file_data(file_path)
+        if file_info is None:
+            self._log.error(f"Cannot select not existing file: {file_path}")
+            return False
+
+        self._selected_project_file = file_info
+        self._send_file_selected_message()
+        return True
+
     ##~~ command implementations
 
     @gcode_executor.register_no_data("M21")
@@ -292,19 +328,18 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M23")
     def _select_sd_file(self, data: str) -> bool:
         filename = data.split(maxsplit=1)[1].strip()
-        self._list_sd()
-        if not self.file_system.select_project_file(filename):
-            return False
+        self._list_project_files()
+        return self.select_project_file(filename)
 
-        assert self.file_system.selected_file is not None
-        self._current_state.update_print_job_info()
+    def _send_file_selected_message(self):
+        if self.selected_file is None:
+            return
 
         self.sendIO(
-            f"File opened: {self.file_system.selected_file.file_name}  "
-            f"Size: {self.file_system.selected_file.size}"
+            f"File opened: {self.selected_file.file_name}  "
+            f"Size: {self.selected_file.size}"
         )
         self.sendIO("File selected")
-        return True
 
     @gcode_executor.register("M26")
     def _set_sd_position(self, data: str) -> bool:
@@ -336,9 +371,9 @@ class BambuVirtualPrinter:
 
     @gcode_executor.register("M30")
     def _delete_sd_file(self, data: str) -> bool:
-        filename = data.split(None, 1)[1].strip()
-        self._list_sd()
-        self.file_system.delete_file(filename)
+        file_path = data.split(None, 1)[1].strip()
+        self._list_project_files()
+        self.file_system.delete_file(Path(file_path))
         return True
 
     @gcode_executor.register("M105")
@@ -429,14 +464,17 @@ class BambuVirtualPrinter:
         return True
 
     @gcode_executor.register("M20")
-    def _list_sd(self, data: str = ""):
+    def _list_project_files(self, data: str = ""):
+        self._project_files_view.update()
+        return True
+
+    def _list_cached_project_files(self):
         self.sendIO("Begin file list")
         for item in map(
-            lambda f: f.get_log_info(), self.file_system.get_all_project_files()
+            FileInfo.get_gcode_info, self._project_files_view.get_all_cached_info()
         ):
             self.sendIO(item)
         self.sendIO("End file list")
-        return True
 
     @gcode_executor.register_no_data("M24")
     def _start_print(self):

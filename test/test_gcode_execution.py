@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
 import pybambu
 import pybambu.commands
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
@@ -190,9 +191,9 @@ def test_list_sd_card(printer: BambuVirtualPrinter):
     assert result[4] == b"ok"
 
 
-def test_list_ftp_paths_bambu_p1(settings, ftps_session_mock):
-    settings.get.side_effect.options[("device_type",)] = "P1S"
+def test_list_ftp_paths_p1s(settings, ftps_session_mock):
     file_system = RemoteSDCardFileList(settings)
+    file_view = CachedFileView(file_system).with_filter("timelapse/", ".avi")
 
     timelapse_files = ["timelapse/video.avi", "timelapse/video2.avi"]
     ftps_session_mock.size.side_effect = DictGetter(
@@ -209,15 +210,15 @@ def test_list_ftp_paths_bambu_p1(settings, ftps_session_mock):
     )
 
     timelapse_paths = list(map(Path, timelapse_files))
-    result_files = file_system.get_all_timelapse_files()
+    result_files = file_view.get_all_info()
     assert len(timelapse_files) == len(result_files) and all(
         file_info.path in timelapse_paths for file_info in result_files
     )
 
 
-def test_list_ftp_paths_bambu_x1(settings, ftps_session_mock):
-    settings.get.side_effect.options[("device_type",)] = "X1"
+def test_list_ftp_paths_x1(settings, ftps_session_mock):
     file_system = RemoteSDCardFileList(settings)
+    file_view = CachedFileView(file_system).with_filter("timelapse/", ".mp4")
 
     timelapse_files = ["timelapse/video.mp4", "timelapse/video2.mp4"]
     ftps_session_mock.size.side_effect = DictGetter(
@@ -232,7 +233,7 @@ def test_list_ftp_paths_bambu_x1(settings, ftps_session_mock):
     ftps_session_mock.nlst.side_effect = DictGetter({"timelapse/": timelapse_files})
 
     timelapse_paths = list(map(Path, timelapse_files))
-    result_files = file_system.get_all_timelapse_files()
+    result_files = file_view.get_all_info()
     assert len(timelapse_files) == len(result_files) and all(
         file_info.path in timelapse_paths for file_info in result_files
     )
@@ -247,18 +248,18 @@ def test_cannot_start_print_without_file(printer: BambuVirtualPrinter):
 
 
 def test_non_existing_file_not_selected(printer: BambuVirtualPrinter):
-    assert printer.file_system.selected_file is None
+    assert printer.selected_file is None
 
     printer.write(b"M23 non_existing.3mf\n")
     printer.flush()
     result = printer.readlines()
     assert result[-2] != b"File selected"
     assert result[-1] == b"ok"
-    assert printer.file_system.selected_file is None
+    assert printer.selected_file is None
 
 
 def test_print_started_with_selected_file(printer: BambuVirtualPrinter, print_job_mock):
-    assert printer.file_system.selected_file is None
+    assert printer.selected_file is None
 
     printer.write(b"M20\n")
     printer.flush()
@@ -270,8 +271,8 @@ def test_print_started_with_selected_file(printer: BambuVirtualPrinter, print_jo
     assert result[-2] == b"File selected"
     assert result[-1] == b"ok"
 
-    assert printer.file_system.selected_file is not None
-    assert printer.file_system.selected_file.file_name == "print.3mf"
+    assert printer.selected_file is not None
+    assert printer.selected_file.file_name == "print.3mf"
 
     print_job_mock.subtask_name = "print.3mf"
 
@@ -403,12 +404,12 @@ def test_finished_print_job_reset_after_new_file_selected(
     printer.new_update("event_printer_data_update")
     printer.flush()
     assert isinstance(printer.current_state, IdleState)
-    assert printer.current_print_job is not None
-    assert printer.current_print_job.file_info.file_name == "print.3mf"
-    assert printer.current_print_job.progress == 100
+    assert printer.current_print_job is None
+    assert printer.selected_file is not None
+    assert printer.selected_file.file_name == "print.3mf"
 
     printer.write(b"M23 print2.3mf\n")
     printer.flush()
-    assert printer.current_print_job is not None
-    assert printer.current_print_job.file_info.file_name == "print2.3mf"
-    assert printer.current_print_job.progress == 0
+    assert printer.current_print_job is None
+    assert printer.selected_file is not None
+    assert printer.selected_file.file_name == "print2.3mf"
