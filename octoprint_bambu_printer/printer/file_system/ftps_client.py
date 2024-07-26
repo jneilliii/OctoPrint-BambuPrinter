@@ -158,8 +158,8 @@ class IoTFTPSConnection:
 
         try:
             list_result = self.ftps_session.nlst(list_path) or []
-            for file_name in list_result:
-                path = Path(list_path) / file_name
+            for file_list_entry in list_result:
+                path = Path(list_path) / Path(file_list_entry).name
                 if _extension_acceptable(path):
                     yield path
         except Exception as ex:

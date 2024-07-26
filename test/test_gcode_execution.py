@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pybambu
 import pybambu.commands
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
+from octoprint_bambu_printer.printer.file_system.file_info import FileInfo
 from octoprint_bambu_printer.printer.file_system.ftps_client import IoTFTPSClient
 from octoprint_bambu_printer.printer.states.idle_state import IdleState
 from octoprint_bambu_printer.printer.states.paused_state import PausedState
@@ -67,46 +68,49 @@ def profile_manager():
     return _profile_manager
 
 
-@fixture
-def files_info_ftp():
-    def _f_date(dt: datetime):
-        return dt.replace(tzinfo=timezone.utc).strftime("%Y%m%d%H%M%S")
+def _ftp_date_format(dt: datetime):
+    return dt.replace(tzinfo=timezone.utc).strftime("%Y%m%d%H%M%S")
 
+
+@fixture
+def project_files_info_ftp():
     return {
-        "print.3mf": (1000, _f_date(datetime(2024, 5, 6))),
-        "print2.3mf": (1200, _f_date(datetime(2024, 5, 7))),
-        "cache/print.3mf": (1200, _f_date(datetime(2024, 5, 7))),
-        "cache/print2.3mf": (1200, _f_date(datetime(2024, 5, 7))),
+        "print.3mf": (1000, _ftp_date_format(datetime(2024, 5, 6))),
+        "print2.3mf": (1200, _ftp_date_format(datetime(2024, 5, 7))),
     }
 
 
 @fixture
-def ftps_session_mock(files_info_ftp):
+def cache_files_info_ftp():
+    return {
+        "cache/print.3mf": (1200, _ftp_date_format(datetime(2024, 5, 7))),
+        "cache/print2.3mf": (1200, _ftp_date_format(datetime(2024, 5, 7))),
+    }
+
+
+@fixture
+def ftps_session_mock(project_files_info_ftp, cache_files_info_ftp):
+    all_file_info = dict(**project_files_info_ftp, **cache_files_info_ftp)
     ftps_session = MagicMock()
     ftps_session.size.side_effect = DictGetter(
-        {file: info[0] for file, info in files_info_ftp.items()}
+        {file: info[0] for file, info in all_file_info.items()}
     )
 
     ftps_session.sendcmd.side_effect = DictGetter(
-        {f"MDTM {file}": info[1] for file, info in files_info_ftp.items()}
+        {f"MDTM {file}": info[1] for file, info in all_file_info.items()}
     )
 
-    all_files = list(files_info_ftp.keys())
     ftps_session.nlst.side_effect = DictGetter(
         {
-            "": list(filter(lambda f: Path(f).parent == Path("."), all_files))
+            "": list(map(lambda p: Path(p).name, project_files_info_ftp))
             + ["Mock folder"],
-            "cache/": list(
-                map(
-                    lambda f: Path(f).name,
-                    filter(lambda f: Path(f).parent == Path("cache/"), all_files),
-                )
-            )
+            "cache/": list(map(lambda p: Path(p).name, cache_files_info_ftp))
             + ["Mock folder"],
+            "timelapse/": ["video.mp4", "video.avi"],
         }
     )
     IoTFTPSClient.open_ftps_session = MagicMock(return_value=ftps_session)
-    yield
+    yield ftps_session
 
 
 @fixture(scope="function")
@@ -356,3 +360,29 @@ def test_finished_print_job_reset_after_new_file_selected(
     assert printer.current_print_job is not None
     assert printer.current_print_job.file_info.file_name == "print2.3mf"
     assert printer.current_print_job.progress == 0
+
+
+def test_timelapse_paths_bambu_x1(printer: BambuVirtualPrinter, ftps_session_mock):
+    timelapse_files = ["timelapse/video.mp4", "timelapse/video2.avi"]
+    ftps_session_mock.size.side_effect = DictGetter(
+        {file: 100 for file in timelapse_files}
+    )
+    ftps_session_mock.sendcmd.side_effect = DictGetter(
+        {
+            f"MDTM {file}": _ftp_date_format(datetime(2024, 5, 7))
+            for file in timelapse_files
+        }
+    )
+    ftps_session_mock.nlst.side_effect = DictGetter(
+        {
+            "": ["timelapse"],
+            "timelapse/": timelapse_files,
+            "cache/": [],
+        }
+    )
+
+    timelapse_paths = list(map(Path, timelapse_files))
+    assert all(
+        file_info.path in timelapse_paths
+        for file_info in printer.file_system.get_all_timelapse_files()
+    )
