@@ -54,12 +54,11 @@ class PrintingState(APrinterState):
             time.sleep(3)
 
         if self._printer.current_print_job is None:
-
             self._log.warn("Printing state was triggered with empty print job")
             return
 
         if self._printer.current_print_job.progress >= 100:
-            self._finish_print()
+            self._printer.finalize_print_job()
 
     def update_print_job_info(self):
         print_job_info = self._printer.bambu_client.get_device().print_job
@@ -88,17 +87,6 @@ class PrintingState(APrinterState):
         if self._printer.bambu_client.connected:
             if self._printer.bambu_client.publish(pybambu.commands.STOP):
                 self._log.info("print cancelled")
-                self._finish_print()
-                self._printer.change_state(self._printer._state_idle)
+                self._printer.finalize_print_job()
             else:
                 self._log.info("print cancel failed")
-
-    def _finish_print(self):
-        if self._printer.current_print_job is not None:
-            self._log.debug(
-                f"SD File Print finishing: {self._printer.current_print_job.file_info.file_name}"
-            )
-            self._printer.sendIO("Done printing file")
-            self._printer.current_print_job = None
-
-        self._printer.change_state(self._printer._state_idle)

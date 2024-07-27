@@ -19,6 +19,7 @@ class PausedState(APrinterState):
     def __init__(self, printer: BambuVirtualPrinter) -> None:
         super().__init__(printer)
         self._pausedLock = threading.Event()
+        self._paused_repeated_report = None
 
     def init(self):
         if not self._pausedLock.is_set():
@@ -30,24 +31,35 @@ class PausedState(APrinterState):
     def finalize(self):
         if self._pausedLock.is_set():
             self._pausedLock.clear()
+            if self._paused_repeated_report is not None:
+                self._paused_repeated_report.join()
+                self._paused_repeated_report = None
 
     def _sendPaused(self):
         if self._printer.current_print_job is None:
-            self._log.warn("job paused, but no print job available?")
+            self._log.error("job paused, but no print job available?")
+            self._printer.change_state(self._printer._state_printing)
             return
-        paused_timer = RepeatedTimer(
+        self._paused_repeated_report = RepeatedTimer(
             interval=3.0,
             function=self._printer.report_print_job_status,
-            daemon=True,
             run_first=True,
             condition=self._pausedLock.is_set,
         )
-        paused_timer.start()
+        self._paused_repeated_report.start()
 
-    def start_resume_print(self):
+    def start_new_print(self):
         if self._printer.bambu_client.connected:
             if self._printer.bambu_client.publish(pybambu.commands.RESUME):
                 self._log.info("print resumed")
                 self._printer.change_state(self._printer._state_printing)
             else:
                 self._log.info("print resume failed")
+
+    def cancel_print(self):
+        if self._printer.bambu_client.connected:
+            if self._printer.bambu_client.publish(pybambu.commands.STOP):
+                self._log.info("print cancelled")
+                self._printer.finalize_print_job()
+            else:
+                self._log.info("print cancel failed")

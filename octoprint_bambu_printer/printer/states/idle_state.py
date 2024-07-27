@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+from octoprint_bambu_printer.printer.file_system.file_info import FileInfo
 from octoprint_bambu_printer.printer.print_job import PrintJob
 from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState
 
 
 class IdleState(APrinterState):
 
-    def start_resume_print(self):
+    def start_new_print(self):
         selected_file = self._printer.selected_file
         if selected_file is None:
             self._log.warn("Cannot start print job if file was not selected")
             return
 
-        print_command = self._get_print_command_for_file(selected_file.file_name)
+        print_command = self._get_print_command_for_file(selected_file)
+        self._log.debug(f"Sending print command: {print_command}")
         if self._printer.bambu_client.publish(print_command):
             self._log.info(f"Started print for {selected_file.file_name}")
             self._printer.change_state(self._printer._state_printing)
@@ -20,7 +22,13 @@ class IdleState(APrinterState):
             self._log.warn(f"Failed to start print for {selected_file.file_name}")
             self._printer.change_state(self._printer._state_idle)
 
-    def _get_print_command_for_file(self, selected_file):
+    def _get_print_command_for_file(self, selected_file: FileInfo):
+        filesystem_root = (
+            "file:///mnt/sdcard/"
+            if self._printer._settings.get_boolean(["device_type"]) in ["X1", "X1C"]
+            else "file:///sdcard/"
+        )
+
         print_command = {
             "print": {
                 "sequence_id": 0,
@@ -31,14 +39,9 @@ class IdleState(APrinterState):
                 "project_id": "0",
                 "subtask_id": "0",
                 "task_id": "0",
-                "subtask_name": f"{selected_file}",
-                "file": f"{selected_file}",
-                "url": (
-                    f"file:///mnt/sdcard/{selected_file}"
-                    if self._printer._settings.get_boolean(["device_type"])
-                    in ["X1", "X1C"]
-                    else f"file:///sdcard/{selected_file}"
-                ),
+                "subtask_name": f"{selected_file.file_name}",
+                "file": f"{selected_file.path.as_posix()}",
+                "url": f"{filesystem_root}{selected_file.path.as_posix()}",
                 "timelapse": self._printer._settings.get_boolean(["timelapse"]),
                 "bed_leveling": self._printer._settings.get_boolean(["bed_leveling"]),
                 "flow_cali": self._printer._settings.get_boolean(["flow_cali"]),

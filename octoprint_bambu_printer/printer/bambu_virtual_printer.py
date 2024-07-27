@@ -311,6 +311,13 @@ class BambuVirtualPrinter:
     def select_project_file(self, file_path: str) -> bool:
         self._log.debug(f"Select project file: {file_path}")
         file_info = self._project_files_view.get_cached_file_data(file_path)
+        if (
+            self._selected_project_file is not None
+            and file_info is not None
+            and self._selected_project_file.path == file_info.path
+        ):
+            return True
+
         if file_info is None:
             self._log.error(f"Cannot select not existing file: {file_path}")
             return False
@@ -477,8 +484,8 @@ class BambuVirtualPrinter:
         self.sendIO("End file list")
 
     @gcode_executor.register_no_data("M24")
-    def _start_print(self):
-        self._current_state.start_resume_print()
+    def _start_resume_sd_print(self):
+        self._current_state.start_new_print()
         return True
 
     @gcode_executor.register_no_data("M25")
@@ -492,13 +499,27 @@ class BambuVirtualPrinter:
         return True
 
     def report_print_job_status(self):
-        print_job = self.current_print_job
-        if print_job is not None:
+        if self.current_print_job is not None:
             self.sendIO(
-                f"SD printing byte {print_job.file_position}/{print_job.file_info.size}"
+                f"SD printing byte {self.current_print_job.file_position}"
+                f"/{self.current_print_job.file_info.size}"
             )
-        else:
-            self.sendIO("Not SD printing")
+
+    def report_print_finished(self):
+        if self.current_print_job is None:
+            return
+
+        self._log.debug(
+            f"SD File Print finishing: {self.current_print_job.file_info.file_name}"
+        )
+        self.sendIO("Done printing file")
+        self.sendIO("Not SD printing")
+
+    def finalize_print_job(self):
+        if self.current_print_job is not None:
+            self.report_print_finished()
+            self.current_print_job = None
+        self.change_state(self._state_idle)
 
     def _create_temperature_message(self) -> str:
         template = "{heater}:{actual:.2f}/ {target:.2f}"

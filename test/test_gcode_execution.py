@@ -294,15 +294,16 @@ def test_pause_print(printer: BambuVirtualPrinter, bambu_client_mock, print_job_
     printer.readlines()
     assert isinstance(printer.current_state, PrintingState)
 
-    bambu_client_mock.publish.return_value = True
     printer.write(b"M25\n")  # GCode for pausing the print
     printer.flush()
     result = printer.readlines()
     assert result[0] == b"ok"
     assert isinstance(printer.current_state, PausedState)
+    bambu_client_mock.publish.assert_called_with(pybambu.commands.PAUSE)
 
 
 def test_events_update_printer_state(printer: BambuVirtualPrinter, print_job_mock):
+    print_job_mock.subtask_name = "print.3mf"
     print_job_mock.gcode_state = "RUNNING"
     printer.new_update("event_printer_data_update")
     printer.flush()
@@ -338,8 +339,32 @@ def test_printer_info_check(printer: BambuVirtualPrinter):
     assert isinstance(printer.current_state, IdleState)
 
 
-def test_abort_print(printer: BambuVirtualPrinter):
-    printer.write(b"M26\n")  # GCode for aborting the print
+def test_abort_print_during_printing(printer: BambuVirtualPrinter, print_job_mock):
+    print_job_mock.subtask_name = "print.3mf"
+
+    printer.write(b"M20\nM23 print.3mf\nM24\n")
+    printer.flush()
+    printer.readlines()
+    assert isinstance(printer.current_state, PrintingState)
+
+    printer.write(b"M26 S0\n")
+    printer.flush()
+    result = printer.readlines()
+    assert result[-1] == b"ok"
+    assert isinstance(printer.current_state, IdleState)
+
+
+def test_abort_print_during_pause(printer: BambuVirtualPrinter, print_job_mock):
+    print_job_mock.subtask_name = "print.3mf"
+
+    printer.write(b"M20\nM23 print.3mf\nM24\n")
+    printer.flush()
+    printer.write(b"M25\n")
+    printer.flush()
+    printer.readlines()
+    assert isinstance(printer.current_state, PausedState)
+
+    printer.write(b"M26 S0\n")
     printer.flush()
 
     result = printer.readlines()
