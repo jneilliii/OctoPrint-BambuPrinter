@@ -44,7 +44,7 @@ class PausedState(APrinterState):
         )
         paused_timer.start()
 
-    def resume_print(self):
+    def start_resume_print(self):
         if self._printer.bambu_client.connected:
             if self._printer.bambu_client.publish(pybambu.commands.RESUME):
                 self._log.info("print resumed")
