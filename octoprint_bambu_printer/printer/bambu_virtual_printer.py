@@ -385,7 +385,8 @@ class BambuVirtualPrinter:
 
     @gcode_executor.register("M105")
     def _report_temperatures(self, data: str) -> bool:
-        return self._processTemperatureQuery()
+        self._processTemperatureQuery()
+        return True
 
     # noinspection PyUnusedLocal
     @gcode_executor.register_no_data("M115")
