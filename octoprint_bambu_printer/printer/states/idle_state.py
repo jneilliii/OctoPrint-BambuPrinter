@@ -12,7 +12,7 @@ class IdleState(APrinterState):
             self._log.warn("Cannot start print job if file was not selected")
             return
 
-        print_command = self._get_print_command_for_file(selected_file)
+        print_command = self._get_print_command_for_file(selected_file.file_name)
         if self._printer.bambu_client.publish(print_command):
             self._log.info(f"Started print for {selected_file.file_name}")
             self._printer.change_state(self._printer._state_printing)
