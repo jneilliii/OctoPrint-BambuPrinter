@@ -478,7 +478,7 @@ class BambuVirtualPrinter:
 
     @gcode_executor.register_no_data("M24")
     def _start_print(self):
-        self._current_state.start_new_print()
+        self._current_state.start_resume_print()
         return True
 
     @gcode_executor.register_no_data("M25")
