@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
+import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -29,7 +30,9 @@ def output_test_folder(output_folder: Path):
 
 @fixture
 def log_test():
-    return logging.getLogger("gcode_unittest")
+    log = logging.getLogger("gcode_unittest")
+    log.setLevel(logging.DEBUG)
+    return log
 
 
 class DictGetter:
