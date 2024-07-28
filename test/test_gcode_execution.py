@@ -278,9 +278,13 @@ def test_print_started_with_selected_file(printer: BambuVirtualPrinter, print_jo
 
     printer.write(b"M24\n")
     printer.flush()
-
     result = printer.readlines()
-    assert result[0] == b"ok"
+    assert result[-1] == b"ok"
+
+    # emulate printer reporting it's status
+    print_job_mock.gcode_state = "RUNNING"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
     assert isinstance(printer.current_state, PrintingState)
 
 
@@ -291,13 +295,20 @@ def test_pause_print(printer: BambuVirtualPrinter, bambu_client_mock, print_job_
     printer.write(b"M23 print.3mf\n")
     printer.write(b"M24\n")
     printer.flush()
-    printer.readlines()
+
+    print_job_mock.gcode_state = "RUNNING"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
     assert isinstance(printer.current_state, PrintingState)
 
-    printer.write(b"M25\n")  # GCode for pausing the print
+    printer.write(b"M25\n")  # pausing the print
     printer.flush()
     result = printer.readlines()
-    assert result[0] == b"ok"
+    assert result[-1] == b"ok"
+
+    print_job_mock.gcode_state = "PAUSE"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
     assert isinstance(printer.current_state, PausedState)
     bambu_client_mock.publish.assert_called_with(pybambu.commands.PAUSE)
 
@@ -344,6 +355,9 @@ def test_abort_print_during_printing(printer: BambuVirtualPrinter, print_job_moc
 
     printer.write(b"M20\nM23 print.3mf\nM24\n")
     printer.flush()
+    print_job_mock.gcode_state = "RUNNING"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
     printer.readlines()
     assert isinstance(printer.current_state, PrintingState)
 
@@ -359,14 +373,21 @@ def test_abort_print_during_pause(printer: BambuVirtualPrinter, print_job_mock):
 
     printer.write(b"M20\nM23 print.3mf\nM24\n")
     printer.flush()
+    print_job_mock.gcode_state = "RUNNING"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
+
     printer.write(b"M25\n")
     printer.flush()
+    print_job_mock.gcode_state = "PAUSE"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
+
     printer.readlines()
     assert isinstance(printer.current_state, PausedState)
 
     printer.write(b"M26 S0\n")
     printer.flush()
-
     result = printer.readlines()
     assert result[-1] == b"ok"
     assert isinstance(printer.current_state, IdleState)
@@ -394,7 +415,9 @@ def test_file_selection_does_not_affect_current_print(
 
     printer.write(b"M23 print.3mf\nM24\n")
     printer.flush()
-    printer.readlines()
+    print_job_mock.gcode_state = "RUNNING"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
     assert isinstance(printer.current_state, PrintingState)
     assert printer.current_print_job is not None
     assert printer.current_print_job.file_info.file_name == "print.3mf"
@@ -414,7 +437,9 @@ def test_finished_print_job_reset_after_new_file_selected(
 
     printer.write(b"M23 print.3mf\nM24\n")
     printer.flush()
-    printer.readlines()
+    print_job_mock.gcode_state = "RUNNING"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
     assert isinstance(printer.current_state, PrintingState)
     assert printer.current_print_job is not None
     assert printer.current_print_job.file_info.file_name == "print.3mf"

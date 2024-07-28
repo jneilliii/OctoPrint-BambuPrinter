@@ -71,6 +71,7 @@ class BambuVirtualPrinter:
         self._current_state = self._state_idle
 
         self._running = True
+        self._print_status_reporter = None
         self._printer_thread = threading.Thread(
             target=self._printer_worker,
             name="octoprint.plugins.bambu_printer.printer_state",
@@ -274,9 +275,9 @@ class BambuVirtualPrinter:
             self.lastN = 0
             self._running = False
 
-            if self._sdstatus_reporter is not None:
-                self._sdstatus_reporter.cancel()
-                self._sdstatus_reporter = None
+            if self._print_status_reporter is not None:
+                self._print_status_reporter.cancel()
+                self._print_status_reporter = None
 
             if self._settings.get_boolean(["simulateReset"]):
                 for item in self._settings.get(["resetLines"]):
@@ -362,19 +363,27 @@ class BambuVirtualPrinter:
         matchS = re.search(r"S([0-9]+)", data)
         if matchS:
             interval = int(matchS.group(1))
-            if self._sdstatus_reporter is not None:
-                self._sdstatus_reporter.cancel()
-
             if interval > 0:
-                self._sdstatus_reporter = RepeatedTimer(
-                    interval, self.report_print_job_status
-                )
-                self._sdstatus_reporter.start()
+                self.start_continuous_status_report(interval)
             else:
-                self._sdstatus_reporter = None
+                self.stop_continuous_status_report()
 
         self.report_print_job_status()
         return True
+
+    def start_continuous_status_report(self, interval: int):
+        if self._print_status_reporter is not None:
+            self._print_status_reporter.cancel()
+
+        self._print_status_reporter = RepeatedTimer(
+            interval, self.report_print_job_status
+        )
+        self._print_status_reporter.start()
+
+    def stop_continuous_status_report(self):
+        if self._print_status_reporter is not None:
+            self._print_status_reporter.cancel()
+            self._print_status_reporter = None
 
     @gcode_executor.register("M30")
     def _delete_sd_file(self, data: str) -> bool:
@@ -393,7 +402,6 @@ class BambuVirtualPrinter:
     def _report_firmware_info(self) -> bool:
         self.sendIO("Bambu Printer Integration")
         self.sendIO("Cap:EXTENDED_M20:1")
-        self.sendIO("Cap:LFN_WRITE:1")
         self.sendIO("Cap:LFN_WRITE:1")
         return True
 
@@ -483,6 +491,7 @@ class BambuVirtualPrinter:
         ):
             self.sendIO(item)
         self.sendIO("End file list")
+        self.sendOk()
 
     @gcode_executor.register_no_data("M24")
     def _start_resume_sd_print(self):
@@ -505,11 +514,13 @@ class BambuVirtualPrinter:
                 f"SD printing byte {self.current_print_job.file_position}"
                 f"/{self.current_print_job.file_info.size}"
             )
+        else:
+            self.sendIO("Not SD printing")
 
     def report_print_finished(self):
         if self.current_print_job is None:
             return
-
+        self.report_print_job_status()
         self._log.debug(
             f"SD File Print finishing: {self.current_print_job.file_info.file_name}"
         )

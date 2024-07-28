@@ -79,7 +79,6 @@ class PrintingState(APrinterState):
         if self._printer.bambu_client.connected:
             if self._printer.bambu_client.publish(pybambu.commands.PAUSE):
                 self._log.info("print paused")
-                self._printer.change_state(self._printer._state_paused)
             else:
                 self._log.info("print pause failed")
 
