@@ -22,10 +22,12 @@ class IdleState(APrinterState):
             self._log.warn(f"Failed to start print for {selected_file.file_name}")
 
     def _get_print_command_for_file(self, selected_file: FileInfo):
-        filesystem_root = Path(
+
+        # URL to print. Root path, protocol can vary. E.g., if sd card, "ftp:///myfile.3mf", "ftp:///cache/myotherfile.3mf"
+        filesystem_root = (
             "file:///mnt/sdcard/"
             if self._printer._settings.get_boolean(["device_type"]) in ["X1", "X1C"]
-            else "file:///sdcard/"
+            else "file:///"
         )
 
         print_command = {
@@ -38,9 +40,9 @@ class IdleState(APrinterState):
                 "project_id": "0",
                 "subtask_id": "0",
                 "task_id": "0",
-                "subtask_name": f"{selected_file.file_name}",
-                "file": f"{selected_file.file_name}",
-                "url": (filesystem_root / selected_file.path).as_posix(),
+                "subtask_name": selected_file.file_name,
+                "url": f"{filesystem_root}{selected_file.path.as_posix()}",
+                "bed_type": "auto",
                 "timelapse": self._printer._settings.get_boolean(["timelapse"]),
                 "bed_leveling": self._printer._settings.get_boolean(["bed_leveling"]),
                 "flow_cali": self._printer._settings.get_boolean(["flow_cali"]),
@@ -49,6 +51,7 @@ class IdleState(APrinterState):
                 ),
                 "layer_inspect": self._printer._settings.get_boolean(["layer_inspect"]),
                 "use_ams": self._printer._settings.get_boolean(["use_ams"]),
+                "ams_mapping": "",
             }
         }
 
