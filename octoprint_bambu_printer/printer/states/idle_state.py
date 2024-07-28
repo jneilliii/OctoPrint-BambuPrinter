@@ -17,10 +17,8 @@ class IdleState(APrinterState):
         self._log.debug(f"Sending print command: {print_command}")
         if self._printer.bambu_client.publish(print_command):
             self._log.info(f"Started print for {selected_file.file_name}")
-            self._printer.change_state(self._printer._state_printing)
         else:
             self._log.warn(f"Failed to start print for {selected_file.file_name}")
-            self._printer.change_state(self._printer._state_idle)
 
     def _get_print_command_for_file(self, selected_file: FileInfo):
         filesystem_root = (
