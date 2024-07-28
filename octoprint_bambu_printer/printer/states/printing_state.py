@@ -54,7 +54,6 @@ class PrintingState(APrinterState):
             time.sleep(3)
 
         self.update_print_job_info()
-        self._printer.report_print_job_status()
         if (
             self._printer.current_print_job is not None
             and self._printer.current_print_job.progress >= 100

@@ -406,6 +406,7 @@ def test_abort_print_during_printing(printer: BambuVirtualPrinter, print_job_moc
     printer.write(b"M20\nM23 print.3mf\nM24\n")
     printer.flush()
     print_job_mock.gcode_state = "RUNNING"
+    print_job_mock.print_percentage = 50
     printer.new_update("event_printer_data_update")
     printer.flush()
     printer.readlines()

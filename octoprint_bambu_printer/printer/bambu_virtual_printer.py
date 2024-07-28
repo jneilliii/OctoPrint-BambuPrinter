@@ -525,17 +525,16 @@ class BambuVirtualPrinter:
     def report_print_finished(self):
         if self.current_print_job is None:
             return
-        self.report_print_job_status()
         self._log.debug(
             f"SD File Print finishing: {self.current_print_job.file_info.file_name}"
         )
         self.sendIO("Done printing file")
-        self.sendIO("Not SD printing")
 
     def finalize_print_job(self):
         if self.current_print_job is not None:
             self.report_print_finished()
             self.current_print_job = None
+            self.report_print_job_status()
         self.change_state(self._state_idle)
 
     def _create_temperature_message(self) -> str:
