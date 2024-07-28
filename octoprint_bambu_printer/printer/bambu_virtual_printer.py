@@ -312,7 +312,9 @@ class BambuVirtualPrinter:
 
     def select_project_file(self, file_path: str) -> bool:
         self._log.debug(f"Select project file: {file_path}")
-        file_info = self._project_files_view.get_file_data(file_path)
+        file_info = self._project_files_view.get_file_by_stem(
+            file_path, [".gcode", ".3mf"]
+        )
         if (
             self._selected_project_file is not None
             and file_info is not None
@@ -337,7 +339,6 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M23")
     def _select_sd_file(self, data: str) -> bool:
         filename = data.split(maxsplit=1)[1].strip()
-        self._update_project_file_list()
         return self.select_project_file(filename)
 
     def _send_file_selected_message(self):

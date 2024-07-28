@@ -89,7 +89,7 @@ def project_files_info_ftp():
 def cache_files_info_ftp():
     return {
         "cache/print.3mf": (1200, _ftp_date_format(datetime(2024, 5, 7))),
-        "cache/print3.3mf": (1200, _ftp_date_format(datetime(2024, 5, 7))),
+        "cache/print3.gcode.3mf": (1200, _ftp_date_format(datetime(2024, 5, 7))),
     }
 
 
@@ -188,7 +188,7 @@ def test_list_sd_card(printer: BambuVirtualPrinter):
     assert result[1].endswith(b'"print.3mf"')
     assert result[2].endswith(b'"print2.3mf"')
     assert result[3].endswith(b'"print.3mf"')
-    assert result[4].endswith(b'"print3.3mf"')
+    assert result[4].endswith(b'"print3.gcode.3mf"')
     assert result[5] == b"End file list"
     assert result[6] == b"ok"
 
@@ -279,14 +279,13 @@ def test_delete_sd_file_by_dosname(printer: BambuVirtualPrinter):
 
 
 def test_select_project_file_by_stem(printer: BambuVirtualPrinter):
-    printer.write(b"M23 print3.3mf\n")
+    printer.write(b"M23 print3\n")
     printer.flush()
     result = printer.readlines()
+    assert printer.selected_file is not None
+    assert printer.selected_file.path == Path("cache/print3.gcode.3mf")
     assert result[-2] == b"File selected"
     assert result[-1] == b"ok"
-
-    assert printer.selected_file is not None
-    assert printer.selected_file.path == Path("cache/print3.3mf")
 
 
 def test_cannot_start_print_without_file(printer: BambuVirtualPrinter):
