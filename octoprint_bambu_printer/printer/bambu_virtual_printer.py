@@ -533,6 +533,7 @@ class BambuVirtualPrinter:
 
     def finalize_print_job(self):
         if self.current_print_job is not None:
+            self.report_print_job_status()
             self.report_print_finished()
             self.current_print_job = None
             self.report_print_job_status()
