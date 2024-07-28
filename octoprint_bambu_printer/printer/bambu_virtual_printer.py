@@ -185,6 +185,7 @@ class BambuVirtualPrinter:
         self._telemetry.bedTargetTemp = temperatures.target_bed_temp
         self._telemetry.chamberTemp = temperatures.chamber_temp
 
+        self._log.debug(f"Received printer state update: {print_job_state}")
         if (
             print_job_state == "IDLE"
             or print_job_state == "FINISH"
@@ -311,7 +312,7 @@ class BambuVirtualPrinter:
 
     def select_project_file(self, file_path: str) -> bool:
         self._log.debug(f"Select project file: {file_path}")
-        file_info = self._project_files_view.get_cached_file_data(file_path)
+        file_info = self._project_files_view.get_file_data(file_path)
         if (
             self._selected_project_file is not None
             and file_info is not None
@@ -336,7 +337,7 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M23")
     def _select_sd_file(self, data: str) -> bool:
         filename = data.split(maxsplit=1)[1].strip()
-        self._list_project_files()
+        self._update_project_file_list()
         return self.select_project_file(filename)
 
     def _send_file_selected_message(self):
@@ -386,10 +387,14 @@ class BambuVirtualPrinter:
             self._print_status_reporter = None
 
     @gcode_executor.register("M30")
-    def _delete_sd_file(self, data: str) -> bool:
-        file_path = data.split(None, 1)[1].strip()
-        self._list_project_files()
-        self.file_system.delete_file(Path(file_path))
+    def _delete_project_file(self, data: str) -> bool:
+        file_path = data.split(maxsplit=1)[1].strip()
+        file_info = self.project_files.get_file_data(file_path)
+        if file_info is not None:
+            self.file_system.delete_file(file_info.path)
+            self._update_project_file_list()
+        else:
+            self._log.error(f"File not found to delete {file_path}")
         return True
 
     @gcode_executor.register("M105")
@@ -480,8 +485,8 @@ class BambuVirtualPrinter:
         return True
 
     @gcode_executor.register("M20")
-    def _list_project_files(self, data: str = ""):
-        self._project_files_view.update()
+    def _update_project_file_list(self, data: str = ""):
+        self._project_files_view.update()  # internally sends list to serial io
         return True
 
     def _list_cached_project_files(self):

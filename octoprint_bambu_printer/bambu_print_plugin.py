@@ -37,7 +37,12 @@ from .printer.bambu_virtual_printer import BambuVirtualPrinter
 @contextmanager
 def measure_elapsed():
     start = perf_counter()
-    yield lambda: perf_counter() - start
+
+    def _get_elapsed():
+        return perf_counter() - start
+
+    yield _get_elapsed
+    print(f"Total elapsed: {_get_elapsed()}")
 
 
 class BambuPrintPlugin(

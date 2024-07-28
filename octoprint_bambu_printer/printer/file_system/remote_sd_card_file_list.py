@@ -7,8 +7,6 @@ import logging.handlers
 
 from octoprint.util import get_dos_filename
 
-from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
-
 from .ftps_client import IoTFTPSClient, IoTFTPSConnection
 from .file_info import FileInfo
 
@@ -23,7 +21,7 @@ class RemoteSDCardFileList:
     def delete_file(self, file_path: Path) -> None:
         try:
             with self.get_ftps_client() as ftp:
-                if ftp.delete_file(str(file_path)):
+                if ftp.delete_file(file_path.as_posix()):
                     self._logger.debug(f"{file_path} deleted")
                 else:
                     raise RuntimeError(f"Deleting file {file_path} failed")

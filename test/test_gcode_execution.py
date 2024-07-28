@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import logging
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
 import pybambu
@@ -89,7 +89,7 @@ def project_files_info_ftp():
 def cache_files_info_ftp():
     return {
         "cache/print.3mf": (1200, _ftp_date_format(datetime(2024, 5, 7))),
-        "cache/print2.3mf": (1200, _ftp_date_format(datetime(2024, 5, 7))),
+        "cache/print3.3mf": (1200, _ftp_date_format(datetime(2024, 5, 7))),
     }
 
 
@@ -187,8 +187,10 @@ def test_list_sd_card(printer: BambuVirtualPrinter):
     assert result[0] == b"Begin file list"
     assert result[1].endswith(b'"print.3mf"')
     assert result[2].endswith(b'"print2.3mf"')
-    assert result[3] == b"End file list"
-    assert result[4] == b"ok"
+    assert result[3].endswith(b'"print.3mf"')
+    assert result[4].endswith(b'"print3.3mf"')
+    assert result[5] == b"End file list"
+    assert result[6] == b"ok"
 
 
 def test_list_ftp_paths_p1s(settings, ftps_session_mock):
@@ -237,6 +239,54 @@ def test_list_ftp_paths_x1(settings, ftps_session_mock):
     assert len(timelapse_files) == len(result_files) and all(
         file_info.path in timelapse_paths for file_info in result_files
     )
+
+
+def test_delete_sd_file_gcode(printer: BambuVirtualPrinter):
+    with patch(
+        "octoprint_bambu_printer.printer.file_system.ftps_client.IoTFTPSConnection.delete_file"
+    ) as delete_function:
+        printer.write(b"M30 print.3mf\n")
+        printer.flush()
+        result = printer.readlines()
+        assert result[-1] == b"ok"
+        delete_function.assert_called_with("print.3mf")
+
+        printer.write(b"M30 cache/print.3mf\n")
+        printer.flush()
+        result = printer.readlines()
+        assert result[-1] == b"ok"
+        delete_function.assert_called_with("cache/print.3mf")
+
+
+def test_delete_sd_file_by_dosname(printer: BambuVirtualPrinter):
+    with patch(
+        "octoprint_bambu_printer.printer.file_system.ftps_client.IoTFTPSConnection.delete_file"
+    ) as delete_function:
+        file_info = printer.project_files.get_file_data("cache/print.3mf")
+        assert file_info is not None
+
+        printer.write(b"M30 " + file_info.dosname.encode() + b"\n")
+        printer.flush()
+        assert printer.readlines()[-1] == b"ok"
+        assert delete_function.call_count == 1
+        delete_function.assert_called_with("cache/print.3mf")
+
+        printer.write(b"M30 cache/print.3mf\n")
+        printer.flush()
+        assert printer.readlines()[-1] == b"ok"
+        assert delete_function.call_count == 2
+        delete_function.assert_called_with("cache/print.3mf")
+
+
+def test_select_project_file_by_stem(printer: BambuVirtualPrinter):
+    printer.write(b"M23 print3.3mf\n")
+    printer.flush()
+    result = printer.readlines()
+    assert result[-2] == b"File selected"
+    assert result[-1] == b"ok"
+
+    assert printer.selected_file is not None
+    assert printer.selected_file.path == Path("cache/print3.3mf")
 
 
 def test_cannot_start_print_without_file(printer: BambuVirtualPrinter):
@@ -463,3 +513,28 @@ def test_finished_print_job_reset_after_new_file_selected(
     assert printer.current_print_job is None
     assert printer.selected_file is not None
     assert printer.selected_file.file_name == "print2.3mf"
+
+
+def test_finish_detected_correctly(printer: BambuVirtualPrinter, print_job_mock):
+    print_job_mock.subtask_name = "print.3mf"
+    print_job_mock.gcode_state = "RUNNING"
+    print_job_mock.print_percentage = 99
+    printer.new_update("event_printer_data_update")
+    printer.flush()
+    assert isinstance(printer.current_state, PrintingState)
+    assert printer.current_print_job is not None
+    assert printer.current_print_job.file_info.file_name == "print.3mf"
+    assert printer.current_print_job.progress == 99
+
+    print_job_mock.print_percentage = 100
+    print_job_mock.gcode_state = "FINISH"
+    printer.new_update("event_printer_data_update")
+    printer.flush()
+    result = printer.readlines()
+    assert result[-3].endswith(b"1000/1000")
+    assert result[-2] == b"Done printing file"
+    assert result[-1] == b"Not SD printing"
+    assert isinstance(printer.current_state, IdleState)
+    assert printer.current_print_job is None
+    assert printer.selected_file is not None
+    assert printer.selected_file.file_name == "print.3mf"

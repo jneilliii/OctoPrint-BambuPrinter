@@ -53,27 +53,29 @@ class PrintingState(APrinterState):
             self._printer.report_print_job_status()
             time.sleep(3)
 
-        if self._printer.current_print_job is None:
-            self._log.warn("Printing state was triggered with empty print job")
-            return
-
-        if self._printer.current_print_job.progress >= 100:
+        self.update_print_job_info()
+        self._printer.report_print_job_status()
+        if (
+            self._printer.current_print_job is not None
+            and self._printer.current_print_job.progress >= 100
+        ):
             self._printer.finalize_print_job()
 
     def update_print_job_info(self):
         print_job_info = self._printer.bambu_client.get_device().print_job
         task_name: str = print_job_info.subtask_name
-        project_file_info = self._printer.project_files.get_file_by_suffix(
+        project_file_info = self._printer.project_files.get_file_by_stem(
             task_name, [".3mf", ".gcode.3mf"]
         )
         if project_file_info is None:
             self._log.debug(f"No 3mf file found for {print_job_info}")
             self._current_print_job = None
+            self._printer.change_state(self._printer._state_idle)
             return
 
         progress = print_job_info.print_percentage
         self._printer.current_print_job = PrintJob(project_file_info, progress)
-        self._printer.select_project_file(project_file_info.file_name)
+        self._printer.select_project_file(project_file_info.path.as_posix())
 
     def pause_print(self):
         if self._printer.bambu_client.connected:

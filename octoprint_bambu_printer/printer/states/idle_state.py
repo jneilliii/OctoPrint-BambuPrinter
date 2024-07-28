@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 
 from octoprint_bambu_printer.printer.file_system.file_info import FileInfo
 from octoprint_bambu_printer.printer.print_job import PrintJob
@@ -21,7 +22,7 @@ class IdleState(APrinterState):
             self._log.warn(f"Failed to start print for {selected_file.file_name}")
 
     def _get_print_command_for_file(self, selected_file: FileInfo):
-        filesystem_root = (
+        filesystem_root = Path(
             "file:///mnt/sdcard/"
             if self._printer._settings.get_boolean(["device_type"]) in ["X1", "X1C"]
             else "file:///sdcard/"
@@ -38,8 +39,8 @@ class IdleState(APrinterState):
                 "subtask_id": "0",
                 "task_id": "0",
                 "subtask_name": f"{selected_file.file_name}",
-                "file": f"{selected_file.path.as_posix()}",
-                "url": f"{filesystem_root}{selected_file.path.as_posix()}",
+                "file": f"{selected_file.file_name}",
+                "url": (filesystem_root / selected_file.path).as_posix(),
                 "timelapse": self._printer._settings.get_boolean(["timelapse"]),
                 "bed_leveling": self._printer._settings.get_boolean(["bed_leveling"]),
                 "flow_cali": self._printer._settings.get_boolean(["flow_cali"]),
