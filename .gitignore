@@ -8,3 +8,5 @@ dist
 .DS_Store
 *.zip
 extras
+
+test/test_output
