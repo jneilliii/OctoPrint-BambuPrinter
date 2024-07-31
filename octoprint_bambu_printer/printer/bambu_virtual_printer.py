@@ -440,7 +440,7 @@ class BambuVirtualPrinter:
     def _set_feedrate_percent(self, data: str) -> bool:
         if self.bambu_client.connected:
             gcode_command = commands.SEND_GCODE_TEMPLATE
-            percent = int(data[1:])
+            percent = int(data.replace("M220 S", ""))
 
             if percent is None or percent < 1 or percent > 166:
                 return True
