@@ -85,7 +85,7 @@ class CachedFileView:
         return file_data
 
     def _get_file_by_stem_cached(self, file_stem: str, allowed_suffixes: list[str]):
-        for file_path_str in self._file_data_cache.keys():
+        for file_path_str in list(self._file_data_cache.keys()) + list(self._file_alias_cache.keys()):
             file_path = Path(file_path_str)
             if file_stem == file_path.with_suffix("").stem and all(
                 suffix in allowed_suffixes for suffix in file_path.suffixes

@@ -72,6 +72,7 @@ class BambuVirtualPrinter:
 
         self._running = True
         self._print_status_reporter = None
+        self._print_temp_reporter = None
         self._printer_thread = threading.Thread(
             target=self._printer_worker,
             name="octoprint.plugins.bambu_printer.printer_state",
@@ -367,8 +368,10 @@ class BambuVirtualPrinter:
             interval = int(matchS.group(1))
             if interval > 0:
                 self.start_continuous_status_report(interval)
+                return False
             else:
                 self.stop_continuous_status_report()
+                return False
 
         self.report_print_job_status()
         return True
@@ -403,10 +406,39 @@ class BambuVirtualPrinter:
         self._processTemperatureQuery()
         return True
 
+    @gcode_executor.register("M155")
+    def _auto_report_temperatures(self, data: str) -> bool:
+        matchS = re.search(r"S([0-9]+)", data)
+        if matchS:
+            interval = int(matchS.group(1))
+            if interval > 0:
+                self.start_continuous_temp_report(interval)
+            else:
+                self.stop_continuous_temp_report()
+
+        self.report_print_job_status()
+        return True
+
+    def start_continuous_temp_report(self, interval: int):
+        if self._print_temp_reporter is not None:
+            self._print_temp_reporter.cancel()
+
+        self._print_temp_reporter = RepeatedTimer(
+            interval, self._processTemperatureQuery
+        )
+        self._print_temp_reporter.start()
+
+    def stop_continuous_temp_report(self):
+        if self._print_temp_reporter is not None:
+            self._print_temp_reporter.cancel()
+            self._print_temp_reporter = None
+
     # noinspection PyUnusedLocal
     @gcode_executor.register_no_data("M115")
     def _report_firmware_info(self) -> bool:
         self.sendIO("Bambu Printer Integration")
+        self.sendIO("Cap:AUTOREPORT_SD_STATUS:1")
+        self.sendIO("Cap:AUTOREPORT_TEMP:1")
         self.sendIO("Cap:EXTENDED_M20:1")
         self.sendIO("Cap:LFN_WRITE:1")
         return True

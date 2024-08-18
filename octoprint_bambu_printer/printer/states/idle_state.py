@@ -26,7 +26,7 @@ class IdleState(APrinterState):
         # URL to print. Root path, protocol can vary. E.g., if sd card, "ftp:///myfile.3mf", "ftp:///cache/myotherfile.3mf"
         filesystem_root = (
             "file:///mnt/sdcard/"
-            if self._printer._settings.get_boolean(["device_type"]) in ["X1", "X1C"]
+            if self._printer._settings.get(["device_type"]) in ["X1", "X1C"]
             else "file:///"
         )
 
