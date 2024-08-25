@@ -117,7 +117,7 @@ class IoTFTPSConnection:
                         # But since we operate in prot p mode
                         # we can close the connection always.
                         # This is cursed but it works.
-                        if "vsFTPd" in self.welcome:
+                        if "vsFTPd" in self.ftps_session.welcome:
                             conn.unwrap()
                         else:
                             conn.shutdown(socket.SHUT_RDWR)
