@@ -56,3 +56,5 @@ class IdleState(APrinterState):
         }
 
         return print_command
+    def cancel_print(self):
+        self._printer.finalize_print_job()
