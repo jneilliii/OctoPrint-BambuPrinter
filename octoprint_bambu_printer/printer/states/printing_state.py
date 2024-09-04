@@ -22,6 +22,7 @@ class PrintingState(APrinterState):
 
     def __init__(self, printer: BambuVirtualPrinter) -> None:
         super().__init__(printer)
+        self._current_print_job = None
         self._is_printing = False
         self._sd_printing_thread = None
 
@@ -36,6 +37,7 @@ class PrintingState(APrinterState):
             self._is_printing = False
             self._sd_printing_thread.join()
             self._sd_printing_thread = None
+        self._printer.current_print_job = None
 
     def _start_worker_thread(self):
         if self._sd_printing_thread is None:
