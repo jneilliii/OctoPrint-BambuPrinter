@@ -1,8 +1,6 @@
 from __future__ import annotations
-from pathlib import Path
 
 from octoprint_bambu_printer.printer.file_system.file_info import FileInfo
-from octoprint_bambu_printer.printer.print_job import PrintJob
 from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState
 
 
@@ -56,5 +54,3 @@ class IdleState(APrinterState):
         }
 
         return print_command
-    def cancel_print(self):
-        self._printer.finalize_print_job()
