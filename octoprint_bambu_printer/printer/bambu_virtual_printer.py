@@ -474,19 +474,51 @@ class BambuVirtualPrinter:
             gcode_command = commands.SEND_GCODE_TEMPLATE
             percent = int(data.replace("M220 S", ""))
 
-            if percent is None or percent < 1 or percent > 166:
-                return True
+            def speed_fraction(speed_percent):
+                return math.floor(10000 / speed_percent) / 100
 
-            speed_fraction = 100 / percent
-            acceleration = math.exp((speed_fraction - 1.0191) / -0.814)
-            feed_rate = (
-                2.1645 * (acceleration**3)
-                - 5.3247 * (acceleration**2)
-                + 4.342 * acceleration
-                - 0.181
-            )
-            speed_level = 1.539 * (acceleration**2) - 0.7032 * acceleration + 4.0834
-            speed_command = f"M204.2 K${acceleration:.2f} \nM220 K${feed_rate:.2f} \nM73.2 R${speed_fraction:.2f} \nM1002 set_gcode_claim_speed_level ${speed_level:.0f}\n"
+            def acceleration_magnitude(speed_percent):
+                return math.exp((speed_fraction(speed_percent) - 1.0191) / -0.8139)
+
+            def feed_rate(speed_percent):
+                return 6.426e-5 * speed_percent ** 2 - 2.484e-3 * speed_percent + 0.654
+
+            def linear_interpolate(x, x_points, y_points):
+                if x <= x_points[0]: return y_points[0]
+                if x >= x_points[-1]: return y_points[-1]
+                for i in range(len(x_points) - 1):
+                    if x_points[i] <= x < x_points[i + 1]:
+                        t = (x - x_points[i]) / (x_points[i + 1] - x_points[i])
+                        return y_points[i] * (1 - t) + y_points[i + 1] * t
+
+            def scale_to_data_points(func, data_points):
+                data_points.sort(key=lambda x: x[0])
+                speeds, values = zip(*data_points)
+                scaling_factors = [v / func(s) for s, v in zip(speeds, values)]
+                return lambda x: func(x) * linear_interpolate(x, speeds, scaling_factors)
+
+            def speed_adjust(speed_percentage):
+                if not 30 <= speed_percentage <= 180:
+                    speed_percentage = 100
+
+                bambu_params = {
+                    "speed": [50, 100, 124, 166],
+                    "acceleration": [0.3, 1.0, 1.4, 1.6],
+                    "feed_rate": [0.7, 1.0, 1.4, 2.0]
+                }
+
+                acc_mag_scaled = scale_to_data_points(acceleration_magnitude,
+                                                      list(zip(bambu_params["speed"], bambu_params["acceleration"])))
+                feed_rate_scaled = scale_to_data_points(feed_rate,
+                                                        list(zip(bambu_params["speed"], bambu_params["feed_rate"])))
+
+                speed_frac = speed_fraction(speed_percentage)
+                acc_mag = acc_mag_scaled(speed_percentage)
+                feed = feed_rate_scaled(speed_percentage)
+                # speed_level = 1.539 * (acc_mag**2) - 0.7032 * acc_mag + 4.0834
+                return f"M204.2 K{acc_mag:.2f}\nM220 K{feed:.2f}\nM73.2 R{speed_frac:.2f}\n" # M1002 set_gcode_claim_speed_level ${speed_level:.0f}\n
+
+            speed_command = speed_adjust(percent)
 
             gcode_command["print"]["param"] = speed_command
             if self.bambu_client.publish(gcode_command):
