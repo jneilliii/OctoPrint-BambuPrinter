@@ -580,8 +580,9 @@ class BambuVirtualPrinter:
 
     def report_print_job_status(self):
         if self.current_print_job is not None:
+            file_position = 1 if self.current_print_job.file_position == 0 else self.current_print_job.file_position
             self.sendIO(
-                f"SD printing byte {self.current_print_job.file_position}"
+                f"SD printing byte {file_position}"
                 f"/{self.current_print_job.file_info.size}"
             )
         else:
