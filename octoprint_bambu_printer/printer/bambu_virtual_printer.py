@@ -193,7 +193,7 @@ class BambuVirtualPrinter:
             or print_job_state == "FAILED"
         ):
             self.change_state(self._state_idle)
-        elif print_job_state == "RUNNING":
+        elif print_job_state == "RUNNING" or print_job_state == "PREPARE":
             self.change_state(self._state_printing)
         elif print_job_state == "PAUSE":
             self.change_state(self._state_paused)
