@@ -7,8 +7,8 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
-import pybambu
-import pybambu.commands
+import octoprint_bambu_printer.printer.pybambu
+import octoprint_bambu_printer.printer.pybambu.commands
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
 from octoprint_bambu_printer.printer.file_system.file_info import FileInfo
 from octoprint_bambu_printer.printer.file_system.ftps_client import IoTFTPSClient

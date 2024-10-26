@@ -33,7 +33,7 @@ plugin_url = "https://github.com/jneilliii/OctoPrint-BambuPrinter"
 plugin_license = "AGPLv3"
 
 # Any additional requirements besides OctoPrint should be listed here
-plugin_requires = ["paho-mqtt<2", "python-dateutil", "pybambu>=1.0.1"]
+plugin_requires = ["paho-mqtt<2", "python-dateutil", "httpx[http2]>=0.27.0"]
 
 ### --------------------------------------------------------------------------------------------------------------------
 ### More advanced options that you usually shouldn't have to touch follow after this point

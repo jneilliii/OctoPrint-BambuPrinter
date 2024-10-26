@@ -1,0 +1,21 @@
+name: issue validator
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Okabe-Junya/issue-validator@v0.4.1
+        with:
+          body: '/\[(octoprint\.log)\]|\[(plugin_bambu_printer_serial\.log)\]/g'
+          body-regex-flags: 'true'
+          is-auto-close: 'true'
+          issue-type: 'both'
+          github-token: ${{ secrets.GITHUB_TOKEN }}

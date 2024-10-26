@@ -1,0 +1,12 @@
+<div class="row-fluid" data-bind="foreach: settingsViewModel.settings.plugins.bambu_printer.ams_data">
+    <!-- ko if: $data -->
+    <div class="well" data-bind="foreach: tray">
+        <div class="span3 text-center" data-bind="attr: {title: name}">
+            <div class="row-fluid">
+                <i class="fa-3x fa-life-ring" data-bind="css: {'fas': !empty(), 'far': empty()}, style: {'color': ('#'+color())}"></i><br>
+                <div class="text-center" data-bind="text: type"></div>
+            </div>
+        </div>
+    </div>
+    <!-- /ko -->
+</div>

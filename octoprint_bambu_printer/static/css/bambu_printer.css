@@ -1,0 +1,11 @@
+#sidebar_plugin_bambu_printer div.well {
+    min-height: 50px;
+}
+
+#bambu_printer_print_options div.well {
+    min-height: 60px;
+}
+
+#bambu_printer_print_options div.modal-body {
+    overflow: inherit !important;
+}

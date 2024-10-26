@@ -10,9 +10,9 @@ if TYPE_CHECKING:
 
 import threading
 
-import pybambu
-import pybambu.models
-import pybambu.commands
+import octoprint_bambu_printer.printer.pybambu
+import octoprint_bambu_printer.printer.pybambu.models
+import octoprint_bambu_printer.printer.pybambu.commands
 
 from octoprint_bambu_printer.printer.print_job import PrintJob
 from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState

@@ -49,7 +49,7 @@ class IdleState(APrinterState):
                 ),
                 "layer_inspect": self._printer._settings.get_boolean(["layer_inspect"]),
                 "use_ams": self._printer._settings.get_boolean(["use_ams"]),
-                "ams_mapping": "",
+                "ams_mapping": self._printer._settings.get(["ams_mapping"]),
             }
         }
 

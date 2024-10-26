@@ -22,7 +22,7 @@ from octoprint.access.permissions import Permissions
 from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
 
 from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
-from pybambu import BambuCloud
+from octoprint_bambu_printer.printer.pybambu import BambuCloud
 
 from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import (
     RemoteSDCardFileList,
@@ -67,7 +67,9 @@ class BambuPrintPlugin(
             self._timelapse_files_view.with_filter("timelapse/", ".avi")
 
     def get_assets(self):
-        return {"js": ["js/bambu_printer.js"]}
+        return {"js": ["js/jquery-ui.min.js", "js/knockout-sortable.1.2.0.js", "js/bambu_printer.js"],
+                "css": ["css/bambu_printer.css"]
+                }
 
     def get_template_configs(self):
         return [
@@ -77,7 +79,7 @@ class BambuPrintPlugin(
                 "custom_bindings": True,
                 "template": "bambu_timelapse.jinja2",
             },
-        ]  # , {"type": "generic", "custom_bindings": True, "template": "bambu_printer.jinja2"}]
+            {"type": "generic", "custom_bindings": True, "template": "bambu_printer.jinja2"}]
 
     def get_settings_defaults(self):
         return {
@@ -97,6 +99,8 @@ class BambuPrintPlugin(
             "email": "",
             "auth_token": "",
             "always_use_default_options": False,
+            "ams_data": [],
+            "ams_mapping": []
         }
 
     def is_api_adminonly(self):

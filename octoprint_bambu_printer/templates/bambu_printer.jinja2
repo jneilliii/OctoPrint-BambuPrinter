@@ -1,0 +1,31 @@
+<div id="bambu_printer_print_options" class="modal hide fade">
+	<div class="modal-header">
+		<h3>{{ _('Bambu Print Options') }}</h3>
+	</div>
+    <div class="modal-body">
+        <div class="row-fluid">
+            <div class="span6">
+                <label class="checkbox"><input type="checkbox" data-bind="checked: settingsViewModel.settings.plugins.bambu_printer.timelapse"> {{ _('Enable timelapse') }}</label>
+                <label class="checkbox"><input type="checkbox" data-bind="checked: settingsViewModel.settings.plugins.bambu_printer.bed_leveling"> {{ _('Enable bed leveling') }}</label>
+                <label class="checkbox"><input type="checkbox" data-bind="checked: settingsViewModel.settings.plugins.bambu_printer.flow_cali"> {{ _('Enable flow calibration') }}</label>
+            </div>
+            <div class="span6">
+                <label class="checkbox"><input type="checkbox" data-bind="checked: settingsViewModel.settings.plugins.bambu_printer.vibration_cali"> {{ _('Enable vibration calibration') }}</label>
+                <label class="checkbox"><input type="checkbox" data-bind="checked: settingsViewModel.settings.plugins.bambu_printer.layer_inspect"> {{ _('Enable first layer inspection') }}</label>
+                <label class="checkbox"><input type="checkbox" data-bind="checked: settingsViewModel.settings.plugins.bambu_printer.use_ams"> {{ _('Use AMS') }}</label>
+            </div>
+        </div>
+        <div class="row-fluid" data-bind="visible: settingsViewModel.settings.plugins.bambu_printer.use_ams">
+            {{ _('Filament Assighnment') }}: {{ _('Click') }} <a href="#">{{ _('here') }}</a> {{ _('for usage details.') }}
+        </div>
+        <div class="row-fluid" data-bind="visible: settingsViewModel.settings.plugins.bambu_printer.use_ams, sortable: {data: ams_mapping, options: {cancel: '.unsortable'}}">
+            <div class="btn" data-bind="attr: {title: name}, event: {dblclick: $root.toggle_spool_active}, css: {disabled: (index()<0)}">
+                <i class="fa-2x fa-life-ring" data-bind="css: {'fas': !empty(), 'far': empty()}, style: {'color': ('#'+color())}"></i>
+            </div>
+        </div>
+	</div>
+	<div class="modal-footer">
+		<button class="btn btn-danger" data-bind="click: cancel_print_options">{{ _('Cancel') }}</button>
+        <button class="btn btn-primary" data-bind="click: accept_print_options">{{ _('Print') }}</button>
+	</div>
+</div>

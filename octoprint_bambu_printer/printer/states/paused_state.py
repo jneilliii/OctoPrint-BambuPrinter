@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 import threading
 
-import pybambu.commands
+import octoprint_bambu_printer.printer.pybambu.commands
 from octoprint.util import RepeatedTimer
 
 from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState
