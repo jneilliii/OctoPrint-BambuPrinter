@@ -1,0 +1,24 @@
+#sidebar_plugin_bambu_printer div.well {
+    min-height: 70px;
+}
+
+#sidebar_plugin_bambu_printer div.well div.span3.text-center div.row-fluid {
+    padding-top: 10px;
+}
+
+#sidebar_plugin_bambu_printer div.well div.span3.text-center div.row-fluid.active {
+    border: 2px solid;
+    -webkit-border-radius: 4px;
+    -moz-border-radius: 4px;
+    border-radius: 4px;
+}
+
+#bambu_printer_print_options div.well {
+    min-height: 60px;
+}
+
+#bambu_printer_print_options div.modal-body {
+    overflow: inherit !important;
+}
+
+

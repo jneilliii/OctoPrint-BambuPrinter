@@ -14,7 +14,7 @@ plugin_package = "octoprint_bambu_printer"
 plugin_name = "OctoPrint-BambuPrinter"
 
 # The plugin's version. Can be overwritten within OctoPrint's internal data via __plugin_version__ in the plugin module
-plugin_version = "0.1.7"
+plugin_version = "0.1.8rc1"
 
 # The plugin's description. Can be overwritten within OctoPrint's internal data via __plugin_description__ in the plugin
 # module
@@ -33,7 +33,7 @@ plugin_url = "https://github.com/jneilliii/OctoPrint-BambuPrinter"
 plugin_license = "AGPLv3"
 
 # Any additional requirements besides OctoPrint should be listed here
-plugin_requires = ["paho-mqtt<2", "python-dateutil", "pybambu>=1.0.1"]
+plugin_requires = ["paho-mqtt<2", "python-dateutil", "httpx[http2]>=0.27.0"]
 
 ### --------------------------------------------------------------------------------------------------------------------
 ### More advanced options that you usually shouldn't have to touch follow after this point

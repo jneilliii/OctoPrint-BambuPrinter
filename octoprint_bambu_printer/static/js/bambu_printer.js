@@ -15,6 +15,27 @@ $(function () {
         self.accessViewModel = parameters[3];
         self.timelapseViewModel = parameters[4];
 
+        self.use_ams = true;
+        self.ams_mapping = ko.observableArray([]);
+
+        self.ams_mapping_computed = function(){
+            var output_list = [];
+            var index = 0;
+
+            ko.utils.arrayForEach(self.settingsViewModel.settings.plugins.bambu_printer.ams_data(), function(item){
+                if(item){
+                    output_list = output_list.concat(item.tray());
+                }
+            });
+
+            ko.utils.arrayForEach(output_list, function(item){
+                item["index"] = ko.observable(index);
+                index++;
+            });
+
+            return output_list;
+        };
+
         self.getAuthToken = function (data) {
             self.settingsViewModel.settings.plugins.bambu_printer.auth_token("");
             OctoPrint.simpleApiCommand("bambu_printer", "register", {
@@ -68,7 +89,6 @@ $(function () {
             }
 
             if (data.files !== undefined) {
-                console.log(data.files);
                 self.listHelper.updateItems(data.files);
                 self.listHelper.resetPage();
             }
@@ -78,71 +98,59 @@ $(function () {
             $('#bambu_timelapse').appendTo("#timelapse");
         };
 
+        self.onAfterBinding = function () {
+            console.log(self.ams_mapping_computed());
+        };
+
         self.showTimelapseThumbnail = function(data) {
             $("#bambu_printer_timelapse_thumbnail").attr("src", data.thumbnail);
             $("#bambu_printer_timelapse_preview").modal('show');
         };
 
-        /*$('#files div.upload-buttons > span.fileinput-button:first, #files div.folder-button').remove();
-        $('#files div.upload-buttons > span.fileinput-button:first').removeClass('span6').addClass('input-block-level');
-
-        self.onBeforePrintStart = function(start_print_command) {
-            let confirmation_html = '' +
-                '            <div class="row-fluid form-vertical">\n' +
-                '                <div class="control-group">\n' +
-                '                    <label class="control-label">' + gettext("Plate Number") + '</label>\n' +
-                '                    <div class="controls">\n' +
-                '                        <input type="number" min="1" value="1" id="bambu_printer_plate_number" class="input-mini">\n' +
-                '                    </div>\n' +
-                '                </div>\n' +
-                '            </div>';
-
-            if(!self.settingsViewModel.settings.plugins.bambu_printer.always_use_default_options()){
-                confirmation_html += '\n' +
-                    '            <div class="row-fluid">\n' +
-                    '                <div class="span6">\n' +
-                    '                    <label class="checkbox"><input id="bambu_printer_timelapse" type="checkbox"' + ((self.settingsViewModel.settings.plugins.bambu_printer.timelapse()) ? ' checked' : '') + '> ' + gettext("Enable timelapse") + '</label>\n' +
-                    '                    <label class="checkbox"><input id="bambu_printer_bed_leveling" type="checkbox"' + ((self.settingsViewModel.settings.plugins.bambu_printer.bed_leveling()) ? ' checked' : '') + '> ' + gettext("Enable bed leveling") + '</label>\n' +
-                    '                    <label class="checkbox"><input id="bambu_printer_flow_cali" type="checkbox"' + ((self.settingsViewModel.settings.plugins.bambu_printer.flow_cali()) ? ' checked' : '') + '> ' + gettext("Enable flow calibration") + '</label>\n' +
-                    '                </div>\n' +
-                    '                <div class="span6">\n' +
-                    '                    <label class="checkbox"><input id="bambu_printer_vibration_cali" type="checkbox"' + ((self.settingsViewModel.settings.plugins.bambu_printer.vibration_cali()) ? ' checked' : '') + '> ' + gettext("Enable vibration calibration") + '</label>\n' +
-                    '                    <label class="checkbox"><input id="bambu_printer_layer_inspect" type="checkbox"' + ((self.settingsViewModel.settings.plugins.bambu_printer.layer_inspect()) ? ' checked' : '') + '> ' + gettext("Enable first layer inspection") + '</label>\n' +
-                    '                    <label class="checkbox"><input id="bambu_printer_use_ams" type="checkbox"' + ((self.settingsViewModel.settings.plugins.bambu_printer.use_ams()) ? ' checked' : '') + '> ' + gettext("Use AMS") + '</label>\n' +
-                    '                </div>\n' +
-                    '            </div>\n';
+        self.onBeforePrintStart = function(start_print_command, data) {
+            self.ams_mapping(self.ams_mapping_computed());
+            self.start_print_command = start_print_command;
+            self.use_ams = self.settingsViewModel.settings.plugins.bambu_printer.use_ams();
+            // prevent starting locally stored files, once data is added to core OctoPrint this
+            // could be adjusted to include additional processing like get sliced file's
+            // spool assignments and colors from plate_#.json inside 3mf file.
+            if(data && data.origin !== "sdcard") {
+                return false;
             }
-
-            showConfirmationDialog({
-                title: "Bambu Print Options",
-                html: confirmation_html,
-                cancel: gettext("Cancel"),
-                proceed: [gettext("Print"), gettext("Always")],
-                onproceed: function (idx) {
-                    if(idx === 1){
-                        self.settingsViewModel.settings.plugins.bambu_printer.timelapse($('#bambu_printer_timelapse').is(':checked'));
-                        self.settingsViewModel.settings.plugins.bambu_printer.bed_leveling($('#bambu_printer_bed_leveling').is(':checked'));
-                        self.settingsViewModel.settings.plugins.bambu_printer.flow_cali($('#bambu_printer_flow_cali').is(':checked'));
-                        self.settingsViewModel.settings.plugins.bambu_printer.vibration_cali($('#bambu_printer_vibration_cali').is(':checked'));
-                        self.settingsViewModel.settings.plugins.bambu_printer.layer_inspect($('#bambu_printer_layer_inspect').is(':checked'));
-                        self.settingsViewModel.settings.plugins.bambu_printer.use_ams($('#bambu_printer_use_ams').is(':checked'));
-                        self.settingsViewModel.settings.plugins.bambu_printer.always_use_default_options(true);
-                        self.settingsViewModel.saveData();
-                    }
-                    // replace this with our own print command API call?
-                    start_print_command();
-                },
-                nofade: true
-            });
+            $("#bambu_printer_print_options").modal('show');
             return false;
-        };*/
+        };
+
+        self.toggle_spool_active = function(data) {
+            if(data.index() >= 0){
+                data.original_index = ko.observable(data.index());
+                data.index(-1);
+            } else {
+                data.index(data.original_index());
+            }
+        };
+
+        self.cancel_print_options = function() {
+            self.settingsViewModel.settings.plugins.bambu_printer.use_ams(self.use_ams);
+            $("#bambu_printer_print_options").modal('hide');
+        };
+
+        self.accept_print_options = function() {
+            console.log("starting print!!!!");
+            console.log(self.ams_mapping());
+            $("#bambu_printer_print_options").modal('hide');
+            var flattened_ams_mapping = ko.utils.arrayMap(self.ams_mapping(), function(item) {
+                return item.index();
+            });
+            self.settingsViewModel.settings.plugins.bambu_printer.ams_mapping(flattened_ams_mapping);
+            self.settingsViewModel.saveData(undefined, self.start_print_command);
+            // self.settingsViewModel.saveData();
+        };
     }
 
     OCTOPRINT_VIEWMODELS.push({
         construct: Bambu_printerViewModel,
-        // ViewModels your plugin depends on, e.g. loginStateViewModel, settingsViewModel, ...
         dependencies: ["settingsViewModel", "filesViewModel", "loginStateViewModel", "accessViewModel", "timelapseViewModel"],
-        // Elements to bind to, e.g. #settings_plugin_bambu_printer, #tab_plugin_bambu_printer, ...
-        elements: ["#bambu_printer_print_options", "#settings_plugin_bambu_printer", "#bambu_timelapse"]
+        elements: ["#bambu_printer_print_options", "#settings_plugin_bambu_printer", "#bambu_timelapse", "#sidebar_plugin_bambu_printer"]
     });
 });

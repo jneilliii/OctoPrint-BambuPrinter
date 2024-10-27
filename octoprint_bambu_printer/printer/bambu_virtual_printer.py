@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import collections
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 import math
 from pathlib import Path
 import queue
@@ -11,7 +11,7 @@ import time
 from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
 from octoprint_bambu_printer.printer.file_system.file_info import FileInfo
 from octoprint_bambu_printer.printer.print_job import PrintJob
-from pybambu import BambuClient, commands
+from octoprint_bambu_printer.printer.pybambu import BambuClient, commands
 import logging
 import logging.handlers
 
@@ -43,6 +43,7 @@ class BambuPrinterTelemetry:
     lastTempAt: float = time.monotonic()
     firmwareName: str = "Bambu"
     extruderCount: int = 1
+    ams_current_tray: int = -1
 
 
 # noinspection PyBroadException
@@ -64,6 +65,7 @@ class BambuVirtualPrinter:
         self._data_folder = data_folder
         self._last_hms_errors = None
         self._log = logging.getLogger("octoprint.plugins.bambu_printer.BambuPrinter")
+        self.ams_data = self._settings.get(["ams_data"])
 
         self._state_idle = IdleState(self)
         self._state_printing = PrintingState(self)
@@ -168,6 +170,22 @@ class BambuVirtualPrinter:
     def change_state(self, new_state: APrinterState):
         self._state_change_queue.put(new_state)
 
+    def _convert2serialize(self, obj):
+        if isinstance(obj, dict):
+            return {k: self._convert2serialize(v) for k, v in obj.items()}
+        elif hasattr(obj, "_ast"):
+            return self._convert2serialize(obj._ast())
+        elif not isinstance(obj, str) and hasattr(obj, "__iter__"):
+            return [self._convert2serialize(v) for v in obj]
+        elif hasattr(obj, "__dict__"):
+            return {
+                k: self._convert2serialize(v)
+                for k, v in obj.__dict__.items()
+                if not callable(v) and not k.startswith('_')
+            }
+        else:
+            return obj
+
     def new_update(self, event_type):
         if event_type == "event_hms_errors":
             self._update_hms_errors()
@@ -178,6 +196,13 @@ class BambuVirtualPrinter:
         device_data = self.bambu_client.get_device()
         print_job_state = device_data.print_job.gcode_state
         temperatures = device_data.temperature
+        ams_data = self._convert2serialize(device_data.ams.data)
+
+        if self.ams_data != ams_data:
+            self._log.debug(f"Recieveid AMS Update: {ams_data}")
+            self.ams_data = ams_data
+            self._settings.set(["ams_data"], ams_data)
+            self._settings.save(trigger_event=True)
 
         self.lastTempAt = time.monotonic()
         self._telemetry.temp[0] = temperatures.nozzle_temp
@@ -185,6 +210,11 @@ class BambuVirtualPrinter:
         self._telemetry.bedTemp = temperatures.bed_temp
         self._telemetry.bedTargetTemp = temperatures.target_bed_temp
         self._telemetry.chamberTemp = temperatures.chamber_temp
+        self._telemetry.ams_current_tray = device_data.push_all_data["ams"]["tray_now"] or -1
+
+        if self._telemetry.ams_current_tray != self._settings.get_int(["ams_current_tray"]):
+            self._settings.set_int(["ams_current_tray"], self._telemetry.ams_current_tray)
+            self._settings.save(trigger_event=True)
 
         self._log.debug(f"Received printer state update: {print_job_state}")
         if (
@@ -214,6 +244,8 @@ class BambuVirtualPrinter:
 
     def on_disconnect(self, on_disconnect):
         self._log.debug(f"on disconnect called")
+        self.stop_continuous_status_report()
+        self.stop_continuous_temp_report()
         return on_disconnect
 
     def on_connect(self, on_connect):
