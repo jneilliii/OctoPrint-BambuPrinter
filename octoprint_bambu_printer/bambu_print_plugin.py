@@ -100,7 +100,8 @@ class BambuPrintPlugin(
             "auth_token": "",
             "always_use_default_options": False,
             "ams_data": [],
-            "ams_mapping": []
+            "ams_mapping": [],
+            "ams_current_tray": None,
         }
 
     def is_api_adminonly(self):

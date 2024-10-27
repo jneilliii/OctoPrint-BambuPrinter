@@ -43,6 +43,7 @@ class BambuPrinterTelemetry:
     lastTempAt: float = time.monotonic()
     firmwareName: str = "Bambu"
     extruderCount: int = 1
+    ams_current_tray: int = -1
 
 
 # noinspection PyBroadException
@@ -209,6 +210,11 @@ class BambuVirtualPrinter:
         self._telemetry.bedTemp = temperatures.bed_temp
         self._telemetry.bedTargetTemp = temperatures.target_bed_temp
         self._telemetry.chamberTemp = temperatures.chamber_temp
+        self._telemetry.ams_current_tray = device_data.push_all_data["ams"]["tray_now"] or -1
+
+        if self._telemetry.ams_current_tray != self._settings.get_int(["ams_current_tray"]):
+            self._settings.set_int(["ams_current_tray"], self._telemetry.ams_current_tray)
+            self._settings.save(trigger_event=True)
 
         self._log.debug(f"Received printer state update: {print_job_state}")
         if (
@@ -238,6 +244,8 @@ class BambuVirtualPrinter:
 
     def on_disconnect(self, on_disconnect):
         self._log.debug(f"on disconnect called")
+        self.stop_continuous_status_report()
+        self.stop_continuous_temp_report()
         return on_disconnect
 
     def on_connect(self, on_connect):
