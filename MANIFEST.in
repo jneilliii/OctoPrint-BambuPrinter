@@ -2,3 +2,4 @@ include README.md
 recursive-include octoprint_bambu_printer/templates *
 recursive-include octoprint_bambu_printer/translations *
 recursive-include octoprint_bambu_printer/static *
+include octoprint_bambu_printer/printer/pybambu/filaments.json
