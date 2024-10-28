@@ -210,7 +210,7 @@ class BambuVirtualPrinter:
         self._telemetry.bedTemp = temperatures.bed_temp
         self._telemetry.bedTargetTemp = temperatures.target_bed_temp
         self._telemetry.chamberTemp = temperatures.chamber_temp
-        if device_data.push_all_data:
+        if device_data.push_all_data and "ams" in device_data.push_all_data:
             self._telemetry.ams_current_tray = device_data.push_all_data["ams"]["tray_now"] or 255
 
         if self._telemetry.ams_current_tray != self._settings.get_int(["ams_current_tray"]):
@@ -367,8 +367,9 @@ class BambuVirtualPrinter:
     ##~~ command implementations
 
     @gcode_executor.register_no_data("M21")
-    def _sd_status(self) -> None:
+    def _sd_status(self) -> bool:
         self.sendIO("SD card ok")
+        return True
 
     @gcode_executor.register("M23")
     def _select_sd_file(self, data: str) -> bool:
@@ -469,6 +470,9 @@ class BambuVirtualPrinter:
     # noinspection PyUnusedLocal
     @gcode_executor.register_no_data("M115")
     def _report_firmware_info(self) -> bool:
+        # wait for connection to be established before sending back firmware info
+        while self.bambu_client.connected is False:
+            time.sleep(1)
         self.sendIO("Bambu Printer Integration")
         self.sendIO("Cap:AUTOREPORT_SD_STATUS:1")
         self.sendIO("Cap:AUTOREPORT_TEMP:1")
