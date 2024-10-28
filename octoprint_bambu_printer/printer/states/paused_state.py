@@ -37,14 +37,14 @@ class PausedState(APrinterState):
 
     def start_new_print(self):
         if self._printer.bambu_client.connected:
-            if self._printer.bambu_client.publish(pybambu.commands.RESUME):
+            if self._printer.bambu_client.publish(octoprint_bambu_printer.printer.pybambu.commands.RESUME):
                 self._log.info("print resumed")
             else:
                 self._log.info("print resume failed")
 
     def cancel_print(self):
         if self._printer.bambu_client.connected:
-            if self._printer.bambu_client.publish(pybambu.commands.STOP):
+            if self._printer.bambu_client.publish(octoprint_bambu_printer.printer.pybambu.commands.STOP):
                 self._log.info("print cancelled")
                 self._printer.finalize_print_job()
             else:

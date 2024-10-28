@@ -1,4 +1,6 @@
 from __future__ import absolute_import, annotations
+
+import json
 from pathlib import Path
 import threading
 from time import perf_counter
@@ -101,7 +103,7 @@ class BambuPrintPlugin(
             "always_use_default_options": False,
             "ams_data": [],
             "ams_mapping": [],
-            "ams_current_tray": None,
+            "ams_current_tray": 255,
         }
 
     def is_api_adminonly(self):

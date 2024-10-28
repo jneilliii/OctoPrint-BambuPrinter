@@ -10,6 +10,9 @@ from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import
 class PrintJob:
     file_info: FileInfo
     progress: int
+    remaining_time: int
+    current_layer: int
+    total_layers: int
 
     @property
     def file_position(self):

@@ -18,6 +18,8 @@ $(function () {
         self.use_ams = true;
         self.ams_mapping = ko.observableArray([]);
 
+        self.job_info = ko.observable();
+
         self.ams_mapping_computed = function(){
             var output_list = [];
             var index = 0;
@@ -91,6 +93,10 @@ $(function () {
             if (data.files !== undefined) {
                 self.listHelper.updateItems(data.files);
                 self.listHelper.resetPage();
+            }
+
+            if (data.job_info !== undefined) {
+                self.job_info(data.job_info);
             }
         };
 

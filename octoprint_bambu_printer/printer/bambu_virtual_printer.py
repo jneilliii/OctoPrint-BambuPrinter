@@ -43,7 +43,7 @@ class BambuPrinterTelemetry:
     lastTempAt: float = time.monotonic()
     firmwareName: str = "Bambu"
     extruderCount: int = 1
-    ams_current_tray: int = -1
+    ams_current_tray: int = 255
 
 
 # noinspection PyBroadException
@@ -210,7 +210,8 @@ class BambuVirtualPrinter:
         self._telemetry.bedTemp = temperatures.bed_temp
         self._telemetry.bedTargetTemp = temperatures.target_bed_temp
         self._telemetry.chamberTemp = temperatures.chamber_temp
-        self._telemetry.ams_current_tray = device_data.push_all_data["ams"]["tray_now"] or -1
+        if device_data.push_all_data:
+            self._telemetry.ams_current_tray = device_data.push_all_data["ams"]["tray_now"] or 255
 
         if self._telemetry.ams_current_tray != self._settings.get_int(["ams_current_tray"]):
             self._settings.set_int(["ams_current_tray"], self._telemetry.ams_current_tray)
@@ -356,7 +357,7 @@ class BambuVirtualPrinter:
             return True
 
         if file_info is None:
-            self._log.error(f"Cannot select not existing file: {file_path}")
+            self._log.error(f"Cannot select non-existent file: {file_path}")
             return False
 
         self._selected_project_file = file_info

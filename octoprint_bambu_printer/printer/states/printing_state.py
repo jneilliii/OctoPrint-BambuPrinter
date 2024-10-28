@@ -75,19 +75,19 @@ class PrintingState(APrinterState):
             return
 
         progress = print_job_info.print_percentage
-        self._printer.current_print_job = PrintJob(project_file_info, progress)
+        self._printer.current_print_job = PrintJob(project_file_info, progress, print_job_info.remaining_time, print_job_info.current_layer, print_job_info.total_layers)
         self._printer.select_project_file(project_file_info.path.as_posix())
 
     def pause_print(self):
         if self._printer.bambu_client.connected:
-            if self._printer.bambu_client.publish(pybambu.commands.PAUSE):
+            if self._printer.bambu_client.publish(octoprint_bambu_printer.printer.pybambu.commands.PAUSE):
                 self._log.info("print paused")
             else:
                 self._log.info("print pause failed")
 
     def cancel_print(self):
         if self._printer.bambu_client.connected:
-            if self._printer.bambu_client.publish(pybambu.commands.STOP):
+            if self._printer.bambu_client.publish(octoprint_bambu_printer.printer.pybambu.commands.STOP):
                 self._log.info("print cancelled")
                 self._printer.finalize_print_job()
             else:
