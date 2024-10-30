@@ -264,7 +264,7 @@ class BambuVirtualPrinter:
             self._settings.get(["device_type"]) == ""
             or self._settings.get(["serial"]) == ""
             or self._settings.get(["username"]) == ""
-            or self._settings.get(["access_code"]) == ""
+            or (self._settings.get(["access_code"]) == "" and self._settings.get_boolean(["local_mqtt"]))
         ):
             msg = "invalid settings to start connection with Bambu Printer"
             self._log.debug(msg)
@@ -685,7 +685,7 @@ class BambuVirtualPrinter:
         self._state_change_queue.join()
 
     def _printer_worker(self):
-        self._create_client_connection_async()
+        # self._create_client_connection_async()
         self.sendIO("Printer connection complete")
         while self._running:
             try:
