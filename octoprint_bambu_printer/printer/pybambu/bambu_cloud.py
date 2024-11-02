@@ -10,7 +10,7 @@ from .const import LOGGER
 
 @dataclass
 class BambuCloud:
-  
+
     def __init__(self, region: str, email: str, username: str, auth_token: str):
         self._region = region
         self._email = email
@@ -23,7 +23,7 @@ class BambuCloud:
             url = 'https://api.bambulab.cn/v1/user-service/user/login'
         else:
             url = 'https://api.bambulab.com/v1/user-service/user/login'
-        headers = {'User-Agent' : "HA Bambulab"}
+        headers = {'User-Agent' : "OctoPrint Plugin"}
         data = {'account': self._email, 'password': self._password}
         with httpx.Client(http2=True) as client:
             response = client.post(url, headers=headers, json=data, timeout=10)
@@ -40,7 +40,7 @@ class BambuCloud:
         jsonAuthToken = json.loads(base64.b64decode(b64_string))
         # Gives json payload with "username":"u_<digits>" within it
         return jsonAuthToken['username']
-    
+
     # Retrieves json description of devices in the form:
     # {
     #     'message': 'success',
@@ -79,7 +79,7 @@ class BambuCloud:
     #             }
     #     ]
     # }
-    
+
     def test_authentication(self, region: str, email: str, username: str, auth_token: str) -> bool:
         self._region = region
         self._email = email
@@ -105,7 +105,7 @@ class BambuCloud:
             url = 'https://api.bambulab.cn/v1/iot-service/api/user/bind'
         else:
             url = 'https://api.bambulab.com/v1/iot-service/api/user/bind'
-        headers = {'Authorization': 'Bearer ' + self._auth_token, 'User-Agent' : "HA Bambulab"}
+        headers = {'Authorization': 'Bearer ' + self._auth_token, 'User-Agent' : "OctoPrint Plugin"}
         with httpx.Client(http2=True) as client:
             response = client.get(url, headers=headers, timeout=10)
         if response.status_code >= 400:
@@ -186,14 +186,14 @@ class BambuCloud:
             url = 'https://api.bambulab.cn/v1/iot-service/api/slicer/setting?version=undefined'
         else:
             url = 'https://api.bambulab.com/v1/iot-service/api/slicer/setting?version=undefined'
-        headers = {'Authorization': 'Bearer ' + self._auth_token, 'User-Agent' : "HA Bambulab"}
+        headers = {'Authorization': 'Bearer ' + self._auth_token, 'User-Agent' : "OctoPrint Plugin"}
         with httpx.Client(http2=True) as client:
             response = client.get(url, headers=headers, timeout=10)
         if response.status_code >= 400:
             LOGGER.error(f"Slicer settings load failed: {response.status_code}")
             return None
         return response.json()
-        
+
     # The task list is of the following form with a 'hits' array with typical 20 entries.
     #
     # "total": 531,
@@ -241,14 +241,14 @@ class BambuCloud:
             url = 'https://api.bambulab.cn/v1/user-service/my/tasks'
         else:
             url = 'https://api.bambulab.com/v1/user-service/my/tasks'
-        headers = {'Authorization': 'Bearer ' + self._auth_token, 'User-Agent' : "HA Bambulab"}
+        headers = {'Authorization': 'Bearer ' + self._auth_token, 'User-Agent' : "OctoPrint Plugin"}
         with httpx.Client(http2=True) as client:
             response = client.get(url, headers=headers, timeout=10)
         if response.status_code >= 400:
             LOGGER.debug(f"Received error: {response.status_code}")
             raise ValueError(response.status_code)
         return response.json()
-    
+
     def get_latest_task_for_printer(self, deviceId: str) -> dict:
         LOGGER.debug(f"Getting latest task from Bambu Cloud for Printer: {deviceId}")
         data = self.get_tasklist_for_printer(deviceId)
@@ -283,11 +283,11 @@ class BambuCloud:
     @property
     def username(self):
         return self._username
-    
+
     @property
     def auth_token(self):
         return self._auth_token
-    
+
     @property
     def cloud_mqtt_host(self):
         return "cn.mqtt.bambulab.com" if self._region == "China" else "us.mqtt.bambulab.com"
