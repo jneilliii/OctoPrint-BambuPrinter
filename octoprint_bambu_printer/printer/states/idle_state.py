@@ -25,7 +25,7 @@ class IdleState(APrinterState):
         filesystem_root = (
             "file:///mnt/sdcard/"
             if self._printer._settings.get(["device_type"]) in ["X1", "X1C"]
-            else "file:///"
+            else "file:///sdcard/"
         )
 
         print_command = {
