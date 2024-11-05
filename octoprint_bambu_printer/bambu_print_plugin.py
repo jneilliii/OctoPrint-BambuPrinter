@@ -8,6 +8,8 @@ from contextlib import contextmanager
 import flask
 import logging.handlers
 from urllib.parse import quote as urlquote
+import os
+import zipfile
 
 import octoprint.printer
 import octoprint.server
@@ -135,6 +137,15 @@ class BambuPrintPlugin(
     def on_event(self, event, payload):
         if event == Events.TRANSFER_DONE:
             self._printer.commands("M20 L T", force=True)
+        elif event == Events.FILE_ADDED:
+            if payload["operation"] == "add" and "3mf" in payload["type"]:
+                file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
+                with zipfile.ZipFile(file_container) as z:
+                    with z.open("Metadata/plate_1.json", "r") as json_data:
+                        plate_data = json.load(json_data)
+
+                if plate_data:
+                    self._file_manager.set_additional_metadata("sdcard", payload["path"], "plate_data", plate_data, overwrite=True)
 
     def support_3mf_files(self):
         return {"machinecode": {"3mf": ["3mf"]}}
