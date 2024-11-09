@@ -78,7 +78,6 @@ class Device:
         send_event = send_event | self.home_flag.print_update(data = data)
 
         if send_event and self._client.callback is not None:
-            LOGGER.debug("event_printer_data_update")
             self._client.callback("event_printer_data_update")
 
         if data.get("msg", 0) == 0:
@@ -93,7 +92,7 @@ class Device:
 
     def supports_feature(self, feature):
         if feature == Features.AUX_FAN:
-            return True
+            return self.info.device_type != "A1" and self.info.device_type != "A1MINI"
         elif feature == Features.CHAMBER_LIGHT:
             return True
         elif feature == Features.CHAMBER_FAN:
@@ -124,6 +123,9 @@ class Device:
             return self.info.device_type == "X1" or self.info.device_type == "X1C" or self.info.device_type == "X1E"
         elif feature == Features.MANUAL_MODE:
             return self.info.device_type == "P1P" or self.info.device_type == "P1S" or self.info.device_type == "A1" or self.info.device_type == "A1MINI"
+        elif feature == Features.AMS_FILAMENT_REMAINING:
+            # Technically this is not the AMS Lite but that's currently tied to only these printer types.
+            return self.info.device_type != "A1" and self.info.device_type != "A1MINI"
 
         return False
     
@@ -384,7 +386,7 @@ class PrintJob:
         values = {}
         for i in range(16):
             if self._ams_print_weights[i] != 0:
-                values[f"AMS Slot {i}"] = self._ams_print_weights[i]
+                values[f"AMS Slot {i+1}"] = self._ams_print_weights[i]
         return values
 
     @property
@@ -392,7 +394,7 @@ class PrintJob:
         values = {}
         for i in range(16):
             if self._ams_print_lengths[i] != 0:
-                values[f"AMS Slot {i}"] = self._ams_print_lengths[i]
+                values[f"AMS Slot {i+1}"] = self._ams_print_lengths[i]
         return values
 
     def __init__(self, client):
@@ -450,7 +452,8 @@ class PrintJob:
         self.gcode_file = data.get("gcode_file", self.gcode_file)
         self.print_type = data.get("print_type", self.print_type)
         if self.print_type.lower() not in PRINT_TYPE_OPTIONS:
-            LOGGER.debug(f"Unknown print_type. Please log an issue : '{self.print_type}'")
+            if self.print_type != "":
+                LOGGER.debug(f"Unknown print_type. Please log an issue : '{self.print_type}'")
             self.print_type = "unknown"
         self.subtask_name = data.get("subtask_name", self.subtask_name)
         self.file_type_icon = "mdi:file" if self.print_type != "cloud" else "mdi:cloud-outline"
@@ -471,9 +474,7 @@ class PrintJob:
         if data.get("mc_remaining_time") is not None:
             existing_remaining_time = self.remaining_time
             self.remaining_time = data.get("mc_remaining_time")
-            if self.start_time is None:
-                self.end_time = None
-            elif existing_remaining_time != self.remaining_time:
+            if existing_remaining_time != self.remaining_time:
                 self.end_time = get_end_time(self.remaining_time)
                 LOGGER.debug(f"END TIME2: {self.end_time}")
 
@@ -796,6 +797,12 @@ class Info:
 @dataclass
 class AMSInstance:
     """Return all AMS instance related info"""
+    serial: str
+    sw_version: str
+    hw_version: str
+    humidity_index: int
+    temperature: int
+    tray: list["AMSTray"]
 
     def __init__(self, client):
         self.serial = ""
@@ -813,11 +820,14 @@ class AMSInstance:
 @dataclass
 class AMSList:
     """Return all AMS related info"""
+    tray_now: int
+    data: list[AMSInstance]
 
     def __init__(self, client):
         self._client = client
         self.tray_now = 0
         self.data = [None] * 4
+        self._first_initialization_done = False
 
     def info_update(self, data):
         old_data = f"{self.__dict__}"
@@ -859,7 +869,7 @@ class AMSList:
             
             if index != -1:
                 # Sometimes we get incomplete version data. We have to skip if that occurs since the serial number is
-                # requires as part of the home assistant device identity.
+                # required as part of the home assistant device identity.
                 if not module['sn'] == '':
                     # May get data before info so create entries if necessary
                     if self.data[index] is None:
@@ -874,6 +884,9 @@ class AMSList:
                     if self.data[index].hw_version != module['hw_ver']:
                         data_changed = True
                         self.data[index].hw_version = module['hw_ver']
+            elif not self._first_initialization_done:
+                self._first_initialization_done = True
+                data_changed = True
 
         data_changed = data_changed or (old_data != f"{self.__dict__}")
 
@@ -969,6 +982,19 @@ class AMSList:
 @dataclass
 class AMSTray:
     """Return all AMS tray related info"""
+    empty: bool
+    idx: int
+    name: str
+    type: str
+    sub_brands: str
+    color: str
+    nozzle_temp_min: int
+    nozzle_temp_max: int
+    remain: int
+    k: float
+    tag_uid: str
+    tray_uuid: str
+
 
     def __init__(self, client):
         self._client = client
@@ -982,7 +1008,8 @@ class AMSTray:
         self.nozzle_temp_max = 0
         self.remain = 0
         self.k = 0
-        self.tag_uid = "0000000000000000"
+        self.tag_uid = ""
+        self.tray_uuid = ""
 
     def print_update(self, data) -> bool:
         old_data = f"{self.__dict__}"
@@ -998,7 +1025,8 @@ class AMSTray:
             self.nozzle_temp_min = 0
             self.nozzle_temp_max = 0
             self.remain = 0
-            self.tag_uid = "0000000000000000"
+            self.tag_uid = ""
+            self.tray_uuid = ""
             self.k = 0
         else:
             self.empty = False
@@ -1011,6 +1039,7 @@ class AMSTray:
             self.nozzle_temp_max = data.get('nozzle_temp_max', self.nozzle_temp_max)
             self.remain = data.get('remain', self.remain)
             self.tag_uid = data.get('tag_uid', self.tag_uid)
+            self.tray_uuid = data.get('tray_uuid', self.tray_uuid)
             self.k = data.get('k', self.k)
         
         return (old_data != f"{self.__dict__}")
@@ -1191,8 +1220,9 @@ class PrintErrorList:
     _count: int
 
     def __init__(self, client):
+        self._error = None
+        self._count = 0
         self._client = client
-        self._error = {}
         
     def print_update(self, data) -> bool:
         # Example payload:
@@ -1202,7 +1232,7 @@ class PrintErrorList:
         # 'Unable to feed filament into the extruder. This could be due to entangled filament or a stuck spool. If not, please check if the AMS PTFE tube is connected.'
 
         if 'print_error' in data.keys():
-            errors = {}
+            errors = None
             print_error_code = data.get('print_error')
             if print_error_code != 0:
                 hex_conversion = f'0{int(print_error_code):x}'
@@ -1232,6 +1262,8 @@ class PrintErrorList:
 @dataclass
 class HMSNotification:
     """Return an HMS object and all associated details"""
+    attr: int
+    code: int
 
     def __init__(self, attr: int = 0, code: int = 0):
         self.attr = attr

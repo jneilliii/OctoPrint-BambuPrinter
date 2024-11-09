@@ -345,20 +345,20 @@ class BambuVirtualPrinter:
         self._selected_project_file = None
 
     def select_project_file(self, file_path: str) -> bool:
-        self._log.debug(f"Select project file: {file_path}")
-        file_info = self._project_files_view.get_file_by_stem(
-            file_path, [".gcode", ".3mf"]
-        )
+        file_info = self._project_files_view.get_file_by_name(file_path)
         if (
             self._selected_project_file is not None
             and file_info is not None
             and self._selected_project_file.path == file_info.path
         ):
+            self._log.debug(f"File already selected: {file_path}")
             return True
 
         if file_info is None:
             self._log.error(f"Cannot select non-existent file: {file_path}")
             return False
+
+        self._log.debug(f"Select project file: {file_path}")
 
         self._selected_project_file = file_info
         self._send_file_selected_message()

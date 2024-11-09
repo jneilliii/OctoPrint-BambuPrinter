@@ -108,6 +108,11 @@ class BambuPrintPlugin(
             "ams_current_tray": 255,
         }
 
+    def on_settings_save(self, data):
+        if data.get("local_mqtt", False) is True:
+            data["auth_token"] = ""
+        octoprint.plugin.SettingsPlugin.on_settings_save(self, data)
+
     def is_api_adminonly(self):
         return True
 

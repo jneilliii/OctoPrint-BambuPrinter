@@ -35,8 +35,8 @@ class CachedFileView:
         result: list[FileInfo] = []
 
         with self.file_system.get_ftps_client() as ftp:
-            for filter in self.folder_view.keys():
-                result.extend(self.file_system.list_files(*filter, ftp, existing_files))
+            for key in self.folder_view.keys():
+                result.extend(self.file_system.list_files(*key, ftp, existing_files))
         return result
 
     def update(self):
@@ -56,6 +56,9 @@ class CachedFileView:
     def get_all_cached_info(self):
         return list(self._file_data_cache.values())
 
+    def get_keys_as_list(self):
+        return list(self._file_data_cache.keys()) + list(self._file_alias_cache.keys())
+
     def get_file_data(self, file_path: str | Path) -> FileInfo | None:
         file_data = self.get_file_data_cached(file_path)
         if file_data is None:
@@ -73,22 +76,19 @@ class CachedFileView:
             file_path = self._file_alias_cache.get(file_path, file_path)
         return self._file_data_cache.get(file_path, None)
 
-    def get_file_by_stem(self, file_stem: str, allowed_suffixes: list[str]):
-        if file_stem == "":
+    def get_file_by_name(self, file_name: str):
+        if file_name == "":
             return None
 
-        file_stem = Path(file_stem).with_suffix("").stem
-        file_data = self._get_file_by_stem_cached(file_stem, allowed_suffixes)
+        file_list = self.get_keys_as_list()
+        if not file_name in file_list:
+            if f"{file_name}.3mf" in file_list:
+                file_name = f"{file_name}.3mf"
+            elif f"{file_name}.gcode.3mf" in file_list:
+                file_name = f"{file_name}.gcode.3mf"
+
+        file_data = self.get_file_data_cached(file_name)
         if file_data is None:
             self.update()
-            file_data = self._get_file_by_stem_cached(file_stem, allowed_suffixes)
+            return self.get_file_by_name(file_name)
         return file_data
-
-    def _get_file_by_stem_cached(self, file_stem: str, allowed_suffixes: list[str]):
-        for file_path_str in list(self._file_data_cache.keys()) + list(self._file_alias_cache.keys()):
-            file_path = Path(file_path_str)
-            if file_stem == file_path.with_suffix("").stem and any(
-                suffix in allowed_suffixes for suffix in file_path.suffixes
-            ):
-                return self.get_file_data_cached(file_path)
-        return None
