@@ -43,10 +43,10 @@
 			<input type="text" class="input-block-level" data-bind="value: settingsViewModel.settings.plugins.bambu_printer.email" title="{{ _('Registered email address') }}" autocomplete="off"></input>
 		</div>
 	</div>
-	<div class="control-group" data-bind="visible: !settingsViewModel.settings.plugins.bambu_printer.local_mqtt()">
+	<div class="control-group" data-bind="visible: !settingsViewModel.settings.plugins.bambu_printer.local_mqtt() && show_password()">
 		<label class="control-label">{{ _('Password') }}</label>
 		<div class="controls">
-            <div class="input-block-level input-append">
+            <div class="input-block-level input-append" data-bind="css: {'input-append': !show_verification()}">
 			    <input id="bambu_cloud_password" type="password" class="input-text input-block-level" title="{{ _('Password to generate verification code') }}" autocomplete="new-password"></input>
                 <span class="btn btn-primary add-on" data-bind="visible: !show_verification(), click: getAuthToken">{{ _('Login') }}</span>
             </div>

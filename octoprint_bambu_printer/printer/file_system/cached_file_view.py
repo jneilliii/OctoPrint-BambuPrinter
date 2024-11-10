@@ -86,6 +86,10 @@ class CachedFileView:
                 file_name = f"{file_name}.3mf"
             elif f"{file_name}.gcode.3mf" in file_list:
                 file_name = f"{file_name}.gcode.3mf"
+            elif f"cache/{file_name}.3mf" in file_list:
+                file_name = f"cache/{file_name}.3mf"
+            elif f"cache/{file_name}.gcode.3mf" in file_list:
+                file_name = f"cache/{file_name}.gcode.3mf"
 
         file_data = self.get_file_data_cached(file_name)
         if file_data is None:

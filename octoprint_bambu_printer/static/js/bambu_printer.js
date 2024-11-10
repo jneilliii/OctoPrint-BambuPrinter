@@ -22,6 +22,10 @@ $(function () {
 
         self.auth_type = ko.observable("");
 
+        self.show_password = ko.pureComputed(function(){
+            return self.settingsViewModel.settings.plugins.bambu_printer.auth_token() === '';
+        });
+
         self.show_verification = ko.pureComputed(function(){
             return self.auth_type() !== '';
         });

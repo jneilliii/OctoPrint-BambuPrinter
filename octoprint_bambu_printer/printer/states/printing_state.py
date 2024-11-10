@@ -81,6 +81,8 @@ class PrintingState(APrinterState):
             return
 
         progress = print_job_info.print_percentage
+        if print_job_info.gcode_state == "PREPARE" and progress == 100:
+            progress = 0
         self._printer.current_print_job = PrintJob(project_file_info, progress, print_job_info.remaining_time, print_job_info.current_layer, print_job_info.total_layers)
         self._printer.select_project_file(project_file_info.path.as_posix())
 
