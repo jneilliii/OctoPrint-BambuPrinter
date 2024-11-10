@@ -128,7 +128,7 @@ class Device:
             return self.info.device_type != "A1" and self.info.device_type != "A1MINI"
 
         return False
-    
+
     def get_active_tray(self):
         if self.supports_feature(Features.AMS):
             if self.ams.tray_now == 255:
@@ -179,7 +179,7 @@ class Lights:
         self.work_light = \
             search(data.get("lights_report", []), lambda x: x.get('node', "") == "work_light",
                    {"mode": self.work_light}).get("mode")
-        
+
         return (old_data != f"{self.__dict__}")
 
     def TurnChamberLightOn(self):
@@ -228,7 +228,7 @@ class Camera:
         self.recording = data.get("ipcam", {}).get("ipcam_record", self.recording)
         self.resolution = data.get("ipcam", {}).get("resolution", self.resolution)
         self.rtsp_url = data.get("ipcam", {}).get("rtsp_url", self.rtsp_url)
-        
+
         return (old_data != f"{self.__dict__}")
 
 @dataclass
@@ -255,7 +255,7 @@ class Temperature:
         self.chamber_temp = round(data.get("chamber_temper", self.chamber_temp))
         self.nozzle_temp = round(data.get("nozzle_temper", self.nozzle_temp))
         self.target_nozzle_temp = round(data.get("nozzle_target_temper", self.target_nozzle_temp))
-        
+
         return (old_data != f"{self.__dict__}")
 
 @dataclass
@@ -316,7 +316,7 @@ class Fans:
                 self._cooling_fan_speed_override_time = None
         self._heatbreak_fan_speed = data.get("heatbreak_fan_speed", self._heatbreak_fan_speed)
         self._heatbreak_fan_speed_percentage = fan_percentage(self._heatbreak_fan_speed)
-        
+
         return (old_data != f"{self.__dict__}")
 
     def set_fan_speed(self, fan: FansEnum, percentage: int):
@@ -666,7 +666,7 @@ class Info:
         self.sw_ver = "unknown"
         self.online = False
         self.new_version_state = 0
-        self.mqtt_mode = "local" if self._client._local_mqtt else "bambu_cloud"
+        self.mqtt_mode = "local" if self._client.local_mqtt else "bambu_cloud"
         self.nozzle_diameter = 0
         self.nozzle_type = "unknown"
         self.usage_hours = client._usage_hours
@@ -866,7 +866,7 @@ class AMSList:
                 index = int(name[4])
             elif name.startswith("ams_f1/"):
                 index = int(name[7])
-            
+
             if index != -1:
                 # Sometimes we get incomplete version data. We have to skip if that occurs since the serial number is
                 # required as part of the home assistant device identity.
@@ -1041,7 +1041,7 @@ class AMSTray:
             self.tag_uid = data.get('tag_uid', self.tag_uid)
             self.tray_uuid = data.get('tray_uuid', self.tray_uuid)
             self.k = data.get('k', self.k)
-        
+
         return (old_data != f"{self.__dict__}")
 
 
@@ -1110,7 +1110,7 @@ class Speed:
         self._id = int(data.get("spd_lvl", self._id))
         self.name = get_speed_name(self._id)
         self.modifier = int(data.get("spd_mag", self.modifier))
-        
+
         return (old_data != f"{self.__dict__}")
 
     def SetSpeed(self, option: str):
@@ -1162,7 +1162,7 @@ class HMSList:
         self._count = 0
         self._errors = {}
         self._errors["Count"] = 0
-        
+
     def print_update(self, data) -> bool:
         # Example payload:
         # "hms": [
@@ -1201,14 +1201,14 @@ class HMSList:
                 if self._client.callback is not None:
                     self._client.callback("event_hms_errors")
                 return True
-        
+
         return False
-    
+
     @property
     def errors(self) -> dict:
         #LOGGER.debug(f"PROPERTYCALL: get_hms_errors")
         return self._errors
-    
+
     @property
     def error_count(self) -> int:
         return self._count
@@ -1223,10 +1223,10 @@ class PrintErrorList:
         self._error = None
         self._count = 0
         self._client = client
-        
+
     def print_update(self, data) -> bool:
         # Example payload:
-        # "print_error": 117473286 
+        # "print_error": 117473286
         # So this is 07008006 which we make more human readable to 0700-8006
         # https://e.bambulab.com/query.php?lang=en
         # 'Unable to feed filament into the extruder. This could be due to entangled filament or a stuck spool. If not, please check if the AMS PTFE tube is connected.'
@@ -1249,11 +1249,11 @@ class PrintErrorList:
 
         # We send the error event directly so always return False for the general data event.
         return False
-    
+
     @property
     def error(self) -> dict:
         return self._error
-    
+
     @property
     def on(self) -> int:
         return self._error is not None
@@ -1299,10 +1299,10 @@ class ChamberImage:
 
     def set_jpeg(self, bytes):
         self._bytes = bytes
-    
+
     def get_jpeg(self) -> bytearray:
         return self._bytes.copy()
-    
+
 @dataclass
 class CoverImage:
     """Returns the cover image from the Bambu API"""
@@ -1317,7 +1317,7 @@ class CoverImage:
     def set_jpeg(self, bytes):
         self._bytes = bytes
         self._image_last_updated = datetime.now()
-    
+
     def get_jpeg(self) -> bytearray:
         return self._bytes
 
@@ -1330,7 +1330,7 @@ class HomeFlag:
     """Contains parsed _values from the homeflag sensor"""
     _value: int
     _sw_ver: str
-    _device_type: str 
+    _device_type: str
 
     def __init__(self, client):
         self._value = 0
@@ -1359,7 +1359,7 @@ class HomeFlag:
     def door_open_available(self) -> bool:
         if not self._client._device.supports_feature(Features.DOOR_SENSOR):
             return False
-        
+
         if (self._device_type in ["X1", "X1C"] and version.parse(self._sw_ver) < version.parse("01.07.00.00")):
             return False
 
@@ -1368,7 +1368,7 @@ class HomeFlag:
     @property
     def x_axis_homed(self) -> bool:
         return (self._value & Home_Flag_Values.X_AXIS) != 0
-    
+
     @property
     def y_axis_homed(self) -> bool:
         return (self._value & Home_Flag_Values.Y_AXIS) != 0
@@ -1404,7 +1404,7 @@ class HomeFlag:
     @property
     def sdcard_normal(self) -> bool:
         return self.sdcard_present and (self._value & Home_Flag_Values.HAS_SDCARD_ABNORMAL) != SdcardState.HAS_SDCARD_ABNORMAL
-    
+
     @property
     def ams_auto_switch_filament(self) -> bool:
         return (self._value & Home_Flag_Values.AMS_AUTO_SWITCH) != 0
@@ -1420,11 +1420,11 @@ class HomeFlag:
     @property
     def supports_motor_noise_calibration(self) -> bool:
         return (self._value & Home_Flag_Values.SUPPORTS_MOTOR_CALIBRATION) != 0
-    
+
     @property
     def p1s_upgrade_supported(self) -> bool:
         return (self._value & Home_Flag_Values.SUPPORTED_PLUS) !=  0
-    
+
     @property
     def p1s_upgrade_installed(self) -> bool:
         return (self._value & Home_Flag_Values.INSTALLED_PLUS) !=  0
@@ -1449,7 +1449,7 @@ class SlicerSettings:
 
     def update(self):
         self.custom_filaments = {}
-        if self._client.bambu_cloud.auth_token != "":
+        if self._client.bambu_cloud.auth_token != "" and self._client.local_mqtt is False:
             LOGGER.debug("Loading slicer settings")
             slicer_settings = self._client.bambu_cloud.get_slicer_settings()
             if slicer_settings is not None:

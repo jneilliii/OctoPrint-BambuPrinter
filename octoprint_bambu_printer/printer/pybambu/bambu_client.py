@@ -237,7 +237,7 @@ class MqttThread(threading.Thread):
         exceptionSeen = ""
         while True:
             try:
-                host = self._client.host if self._client._local_mqtt else self._client.bambu_cloud.cloud_mqtt_host
+                host = self._client.host if self._client.local_mqtt else self._client.bambu_cloud.cloud_mqtt_host
                 LOGGER.debug(f"Connect: Attempting Connection to {host}")
                 self._client.client.connect(host, self._client._port, keepalive=5)
 
@@ -289,7 +289,7 @@ class BambuClient:
                  username: str, auth_token: str, access_code: str, usage_hours: float = 0, manual_refresh_mode: bool = False, chamber_image: bool = True):
         self.callback = None
         self.host = host
-        self._local_mqtt = local_mqtt
+        self.local_mqtt = local_mqtt
         self._serial = serial
         self._auth_token = auth_token
         self._access_code = access_code
@@ -342,7 +342,7 @@ class BambuClient:
         self.setup_tls()
 
         self._port = 8883
-        if self._local_mqtt:
+        if self.local_mqtt:
             self.client.username_pw_set("bblp", password=self._access_code)
         else:
             self.client.username_pw_set(self._username, password=self._auth_token)
@@ -532,7 +532,7 @@ class BambuClient:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self.setup_tls)
 
-        if self._local_mqtt:
+        if self.local_mqtt:
             self.client.username_pw_set("bblp", password=self._access_code)
         else:
             self.client.username_pw_set(self._username, password=self._auth_token)

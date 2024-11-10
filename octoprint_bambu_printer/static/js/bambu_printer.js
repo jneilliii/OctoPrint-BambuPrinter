@@ -20,6 +20,12 @@ $(function () {
 
         self.job_info = ko.observable();
 
+        self.auth_type = ko.observable("");
+
+        self.show_verification = ko.pureComputed(function(){
+            return self.auth_type() !== '';
+        });
+
         self.ams_mapping_computed = function(){
             var output_list = [];
             var index = 0;
@@ -40,6 +46,7 @@ $(function () {
 
         self.getAuthToken = function (data) {
             self.settingsViewModel.settings.plugins.bambu_printer.auth_token("");
+            self.auth_type("");
             OctoPrint.simpleApiCommand("bambu_printer", "register", {
                 "email": self.settingsViewModel.settings.plugins.bambu_printer.email(),
                 "password": $("#bambu_cloud_password").val(),
@@ -47,9 +54,26 @@ $(function () {
                 "auth_token": self.settingsViewModel.settings.plugins.bambu_printer.auth_token()
             })
                 .done(function (response) {
+                    self.auth_type(response.auth_response);
+                });
+        };
+
+        self.verifyCode = function (data) {
+            self.settingsViewModel.settings.plugins.bambu_printer.auth_token("");
+            OctoPrint.simpleApiCommand("bambu_printer", "verify", {
+                "password": $("#bambu_cloud_verify_code").val(),
+                "auth_type": self.auth_type(),
+            })
+                .done(function (response) {
                     console.log(response);
-                    self.settingsViewModel.settings.plugins.bambu_printer.auth_token(response.auth_token);
-                    self.settingsViewModel.settings.plugins.bambu_printer.username(response.username);
+                    if (response.auth_token) {
+                        self.settingsViewModel.settings.plugins.bambu_printer.auth_token(response.auth_token);
+                        self.settingsViewModel.settings.plugins.bambu_printer.username(response.username);
+                        self.auth_type("");
+                    } else if (response.error) {
+                        self.settingsViewModel.settings.plugins.bambu_printer.auth_token("");
+                        $("#bambu_cloud_verify_code").val("");
+                    }
                 });
         };
 

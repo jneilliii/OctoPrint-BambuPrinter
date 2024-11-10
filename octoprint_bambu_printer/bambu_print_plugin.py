@@ -61,6 +61,7 @@ class BambuPrintPlugin(
     _plugin_manager: octoprint.plugin.PluginManager
     _bambu_file_system: RemoteSDCardFileList
     _timelapse_files_view: CachedFileView
+    _bambu_cloud: None
 
     def on_settings_initialized(self):
         self._bambu_file_system = RemoteSDCardFileList(self._settings)
@@ -117,7 +118,8 @@ class BambuPrintPlugin(
         return True
 
     def get_api_commands(self):
-        return {"register": ["email", "password", "region", "auth_token"]}
+        return {"register": ["email", "password", "region", "auth_token"],
+                "verify": ["auth_type", "password"]}
 
     def on_api_command(self, command, data):
         if command == "register":
@@ -128,16 +130,44 @@ class BambuPrintPlugin(
                 and "auth_token" in data
             ):
                 self._logger.info(f"Registering user {data['email']}")
-                bambu_cloud = BambuCloud(
+                self._bambu_cloud = BambuCloud(
                     data["region"], data["email"], data["password"], data["auth_token"]
                 )
-                bambu_cloud.login(data["region"], data["email"], data["password"])
+                auth_response = self._bambu_cloud.login(data["region"], data["email"], data["password"])
                 return flask.jsonify(
                     {
-                        "auth_token": bambu_cloud.auth_token,
-                        "username": bambu_cloud.username,
+                        "auth_response": auth_response,
                     }
                 )
+        elif command == "verify":
+            auth_response = None
+            if (
+                "auth_type" in data
+                and "password" in data
+                and self._bambu_cloud is not None
+            ):
+                self._logger.info(f"Verifying user {self._bambu_cloud._email}")
+                if data["auth_type"] == "verifyCode":
+                    auth_response = self._bambu_cloud.login_with_verification_code(data["password"])
+                elif data["auth_type"] == "tfa":
+                    auth_response = self._bambu_cloud.login_with_2fa_code(data["password"])
+                else:
+                    self._logger.warning(f"Unknown verification type: {data['auth_type']}")
+
+                if auth_response == "success":
+                    return flask.jsonify(
+                        {
+                            "auth_token": self._bambu_cloud.auth_token,
+                            "username": self._bambu_cloud.username
+                        }
+                    )
+                else:
+                    self._logger.info(f"Error verifying: {auth_response}")
+                    return flask.jsonify(
+                        {
+                            "error": "Unable to verify"
+                        }
+                    )
 
     def on_event(self, event, payload):
         if event == Events.TRANSFER_DONE:

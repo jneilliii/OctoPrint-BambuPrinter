@@ -286,7 +286,7 @@ class BambuVirtualPrinter:
             local_mqtt=self._settings.get_boolean(["local_mqtt"]),
             region=self._settings.get(["region"]),
             email=self._settings.get(["email"]),
-            auth_token=self._settings.get(["auth_token"]),
+            auth_token=self._settings.get(["auth_token"]) if self._settings.get_boolean(["local_mqtt"]) is False else "",
         )
         bambu_client.on_disconnect = self.on_disconnect(bambu_client.on_disconnect)
         bambu_client.on_connect = self.on_connect(bambu_client.on_connect)

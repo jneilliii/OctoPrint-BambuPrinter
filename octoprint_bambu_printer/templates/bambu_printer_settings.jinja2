@@ -40,15 +40,24 @@
 	<div class="control-group" data-bind="visible: !settingsViewModel.settings.plugins.bambu_printer.local_mqtt()">
 		<label class="control-label">{{ _('Email') }}</label>
 		<div class="controls">
-			<input type="text" class="input-block-level" data-bind="value: settingsViewModel.settings.plugins.bambu_printer.email" title="{{ _('Registered email address') }}"></input>
+			<input type="text" class="input-block-level" data-bind="value: settingsViewModel.settings.plugins.bambu_printer.email" title="{{ _('Registered email address') }}" autocomplete="off"></input>
 		</div>
 	</div>
 	<div class="control-group" data-bind="visible: !settingsViewModel.settings.plugins.bambu_printer.local_mqtt()">
 		<label class="control-label">{{ _('Password') }}</label>
 		<div class="controls">
             <div class="input-block-level input-append">
-			    <input id="bambu_cloud_password" type="password" class="input-text input-block-level" title="{{ _('Password to generate Auth Token') }}"></input>
-                <span class="btn btn-primary add-on" data-bind="click: getAuthToken">{{ _('Login') }}</span>
+			    <input id="bambu_cloud_password" type="password" class="input-text input-block-level" title="{{ _('Password to generate verification code') }}" autocomplete="new-password"></input>
+                <span class="btn btn-primary add-on" data-bind="visible: !show_verification(), click: getAuthToken">{{ _('Login') }}</span>
+            </div>
+		</div>
+	</div>
+	<div class="control-group" data-bind="visible: show_verification()">
+		<label class="control-label">{{ _('Verify') }}</label>
+		<div class="controls">
+            <div class="input-block-level input-append">
+			    <input id="bambu_cloud_verify_code" type="password" class="input-text input-block-level" title="{{ _('Verification code to generate auth token') }}"></input>
+                <span class="btn btn-primary add-on" data-bind="click: verifyCode">{{ _('Verify') }}</span>
             </div>
 		</div>
 	</div>
