@@ -71,7 +71,7 @@ class PrintingState(APrinterState):
         subtask_name: str = print_job_info.subtask_name
         gcode_file: str = print_job_info.gcode_file
 
-        self._log.info(f"update_print_job_info: {print_job_info}")
+        self._log.debug(f"update_print_job_info: {print_job_info}")
 
         project_file_info = self._printer.project_files.get_file_by_name(subtask_name) or self._printer.project_files.get_file_by_name(gcode_file)
         if project_file_info is None:

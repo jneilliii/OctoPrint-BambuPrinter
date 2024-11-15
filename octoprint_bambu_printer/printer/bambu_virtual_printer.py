@@ -170,22 +170,6 @@ class BambuVirtualPrinter:
     def change_state(self, new_state: APrinterState):
         self._state_change_queue.put(new_state)
 
-    def _convert2serialize(self, obj):
-        if isinstance(obj, dict):
-            return {k: self._convert2serialize(v) for k, v in obj.items()}
-        elif hasattr(obj, "_ast"):
-            return self._convert2serialize(obj._ast())
-        elif not isinstance(obj, str) and hasattr(obj, "__iter__"):
-            return [self._convert2serialize(v) for v in obj]
-        elif hasattr(obj, "__dict__"):
-            return {
-                k: self._convert2serialize(v)
-                for k, v in obj.__dict__.items()
-                if not callable(v) and not k.startswith('_')
-            }
-        else:
-            return obj
-
     def new_update(self, event_type):
         if event_type == "event_hms_errors":
             self._update_hms_errors()
@@ -196,7 +180,8 @@ class BambuVirtualPrinter:
         device_data = self.bambu_client.get_device()
         print_job_state = device_data.print_job.gcode_state
         temperatures = device_data.temperature
-        ams_data = self._convert2serialize(device_data.ams.data)
+        # strip out extra data to avoid unneeded settings updates
+        ams_data = [{"tray": asdict(x).pop("tray", None)} for x in device_data.ams.data if x is not None]
 
         if self.ams_data != ams_data:
             self._log.debug(f"Recieveid AMS Update: {ams_data}")
