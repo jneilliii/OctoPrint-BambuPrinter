@@ -259,19 +259,20 @@ class BambuVirtualPrinter:
             f"connecting via local mqtt: {self._settings.get_boolean(['local_mqtt'])}"
         )
         bambu_client = BambuClient(
-            device_type=self._settings.get(["device_type"]),
-            serial=self._settings.get(["serial"]),
-            host=self._settings.get(["host"]),
-            username=(
+            {"device_type": self._settings.get(["device_type"]),
+            "serial": self._settings.get(["serial"]),
+            "host": self._settings.get(["host"]),
+            "username": (
                 "bblp"
                 if self._settings.get_boolean(["local_mqtt"])
                 else self._settings.get(["username"])
             ),
-            access_code=self._settings.get(["access_code"]),
-            local_mqtt=self._settings.get_boolean(["local_mqtt"]),
-            region=self._settings.get(["region"]),
-            email=self._settings.get(["email"]),
-            auth_token=self._settings.get(["auth_token"]) if self._settings.get_boolean(["local_mqtt"]) is False else "",
+            "access_code": self._settings.get(["access_code"]),
+            "local_mqtt": self._settings.get_boolean(["local_mqtt"]),
+            "region": self._settings.get(["region"]),
+            "email": self._settings.get(["email"]),
+            "auth_token": self._settings.get(["auth_token"]) if self._settings.get_boolean(["local_mqtt"]) is False else "",
+             }
         )
         bambu_client.on_disconnect = self.on_disconnect(bambu_client.on_disconnect)
         bambu_client.on_connect = self.on_connect(bambu_client.on_connect)
