@@ -130,9 +130,7 @@ class BambuPrintPlugin(
                 and "auth_token" in data
             ):
                 self._logger.info(f"Registering user {data['email']}")
-                self._bambu_cloud = BambuCloud(
-                    data["region"], data["email"], data["password"], data["auth_token"]
-                )
+                self._bambu_cloud = BambuCloud(data["region"], data["email"], data["password"], data["auth_token"])
                 auth_response = self._bambu_cloud.login(data["region"], data["email"], data["password"])
                 return flask.jsonify(
                     {
