@@ -596,6 +596,17 @@ class BambuVirtualPrinter:
         self._current_state.pause_print()
         return True
 
+    @gcode_executor.register("M355")
+    def _case_lights(self, data: str) -> bool:
+        if data == "M355 S1":
+            light_command = commands.CHAMBER_LIGHT_ON
+        elif data == "M355 S0":
+            light_command = commands.CHAMBER_LIGHT_OFF
+        else:
+            return False
+
+        return self.bambu_client.publish(light_command)
+
     @gcode_executor.register("M524")
     def _cancel_print(self):
         self._current_state.cancel_print()

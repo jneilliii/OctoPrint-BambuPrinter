@@ -48,6 +48,16 @@ $(function () {
             return output_list;
         };
 
+        self.getAdditionalControls = function() {
+            var buttons = [
+                    { name: "Bambu", type: "section", layout: "horizontal", children: [
+                        {type: "command", name: "Light On", enabled: "true", command: "M355 S1"},
+                        {type: "command", name: "Light Off", enabled: "true", command: "M355 S0"}
+                    ]}
+                ];
+            return buttons;
+        };
+
         self.getAuthToken = function (data) {
             self.settingsViewModel.settings.plugins.bambu_printer.auth_token("");
             self.auth_type("");
@@ -133,7 +143,7 @@ $(function () {
         };
 
         self.onAfterBinding = function () {
-            console.log(self.ams_mapping_computed());
+            // console.log(self.ams_mapping_computed());
         };
 
         self.showTimelapseThumbnail = function(data) {
