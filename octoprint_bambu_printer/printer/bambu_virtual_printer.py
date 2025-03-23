@@ -215,6 +215,8 @@ class BambuVirtualPrinter:
             self.change_state(self._state_paused)
         else:
             self._log.warn(f"Unknown print job state: {print_job_state}")
+            self.stop_continuous_temp_report()
+            self.stop_continuous_status_report()
 
     def _update_hms_errors(self):
         bambu_printer = self.bambu_client.get_device()
@@ -386,23 +388,22 @@ class BambuVirtualPrinter:
         matchS = re.search(r"S([0-9]+)", data)
         if matchS:
             interval = int(matchS.group(1))
-            if interval > 0:
+            if interval > 0 and self.bambu_client.connected:
                 self.start_continuous_status_report(interval)
                 return False
             else:
                 self.stop_continuous_status_report()
                 return False
 
-        self.report_print_job_status()
+        # self.report_print_job_status()
         return True
 
     def start_continuous_status_report(self, interval: int):
         if self._print_status_reporter is not None:
             self._print_status_reporter.cancel()
 
-        self._print_status_reporter = RepeatedTimer(
-            interval, self.report_print_job_status
-        )
+        self._print_status_reporter = RepeatedTimer(interval, self.report_print_job_status,
+                                                    condition=self.bambu_client.connected)
         self._print_status_reporter.start()
 
     def stop_continuous_status_report(self):
@@ -431,21 +432,20 @@ class BambuVirtualPrinter:
         matchS = re.search(r"S([0-9]+)", data)
         if matchS:
             interval = int(matchS.group(1))
-            if interval > 0:
+            if interval > 0 and self.bambu_client.connected:
                 self.start_continuous_temp_report(interval)
             else:
                 self.stop_continuous_temp_report()
 
-        self.report_print_job_status()
+        # self.report_print_job_status()
         return True
 
     def start_continuous_temp_report(self, interval: int):
         if self._print_temp_reporter is not None:
             self._print_temp_reporter.cancel()
 
-        self._print_temp_reporter = RepeatedTimer(
-            interval, self._processTemperatureQuery
-        )
+        self._print_temp_reporter = RepeatedTimer(interval, self._processTemperatureQuery,
+                                                  condition=self.bambu_client.connected)
         self._print_temp_reporter.start()
 
     def stop_continuous_temp_report(self):
