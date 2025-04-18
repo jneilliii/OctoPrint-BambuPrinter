@@ -759,7 +759,7 @@ def finalize_print_job(self):
         self._state_change_queue.join()
 
     def _printer_worker(self):
-        # self._create_client_connection_async()
+        self._create_client_connection_async()
         self.sendIO("Printer connection complete")
         while self._running:
             try:
