@@ -776,39 +776,13 @@ def finalize_print_job(self):
     def _trigger_change_state(self, new_state: APrinterState):
         if self._current_state == new_state:
             return
-            
-        self._log.info(
-            f"State transition: {self._current_state.__class__.__name__} -> "
-            f"{new_state.__class__.__name__}"
+        self._log.debug(
+            f"Changing state from {self._current_state.__class__.__name__} to {new_state.__class__.__name__}"
         )
-        
-        try:
-            # Execute pre-transition hooks
-            self._execute_pre_state_change(new_state)
-            
-            # Perform state change
-            self._current_state.finalize()
-            self._current_state = new_state
-            self._current_state.init()
-            
-            # Execute post-transition hooks
-            self._execute_post_state_change()
-            
-        except Exception as e:
-            self._log.error(f"Error during state transition: {str(e)}")
-            # Attempt to recover to idle state
-            self._emergency_state_recovery()
 
-    def _execute_pre_state_change(self, new_state: APrinterState):
-        """Execute any necessary actions before state change"""
-        if isinstance(new_state, IdleState):
-            # Ensure cleanup when transitioning to idle
-            self._ensure_cleanup()
-
-    def _execute_post_state_change(self):
-        """Execute any necessary actions after state change"""
-        # Notify any observers about the state change
-        self.sendIO(f"// action:state_changed {self._current_state.__class__.__name__}")
+        self._current_state.finalize()
+        self._current_state = new_state
+        self._current_state.init()
 
     def _showPrompt(self, text, choices):
         self._hidePrompt()
