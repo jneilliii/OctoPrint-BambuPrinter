@@ -883,42 +883,45 @@ class BambuVirtualPrinter:
             # No state changes, continue processing
             continue
         except Exception as e:
-            self._log.error(f"Error in _printer_worker: {e}", exc_info=True)
+            self._log.error(f"Unexpected error in _printer_worker: {e}", exc_info=True)
 
     # Finalize the current state when the worker stops
     self._log.info("Stopping _printer_worker, finalizing current state.")
     self._current_state.finalize()
 
-    def stop_worker(self):
+def stop_worker(self):
     """Stop the printer worker thread."""
     self._running = False
     self._printer_thread.join()
     self._log.info("Printer worker thread stopped.")
 
-
-    def change_state(self, new_state: APrinterState):
+def change_state(self, new_state: APrinterState):
     """Change the current state of the printer."""
     with self._state_change_queue_lock:
         self._state_change_queue.put(new_state)
         self._log.debug(f"Queued state change to {type(new_state).__name__}")
 
-    def _trigger_change_state(self, new_state: APrinterState):
-        if self._current_state == new_state:
-            return
-        self._log.debug(
-            f"Changing state from {self._current_state.__class__.__name__} to {new_state.__class__.__name__}"
-        )
+def _trigger_change_state(self, new_state: APrinterState):
+    """Trigger an immediate state change."""
+    if self._current_state == new_state:
+        self._log.debug(f"State is already {type(self._current_state).__name__}, skipping transition.")
+        return
 
-        self._current_state.finalize()
-        self._current_state = new_state
-        self._current_state.init()
+    self._log.debug(
+        f"Changing state from {type(self._current_state).__name__} to {type(new_state).__name__}"
+    )
+    self._current_state.finalize()
+    self._current_state = new_state
+    self._current_state.init()
 
-    def _showPrompt(self, text, choices):
-        self._hidePrompt()
-        self.sendIO(f"//action:prompt_begin {text}")
-        for choice in choices:
-            self.sendIO(f"//action:prompt_button {choice}")
-        self.sendIO("//action:prompt_show")
+def _showPrompt(self, text, choices):
+    """Display a prompt with text and choices."""
+    self._hidePrompt()
+    self.sendIO(f"//action:prompt_begin {text}")
+    for choice in choices:
+        self.sendIO(f"//action:prompt_button {choice}")
+    self.sendIO("//action:prompt_show")
 
-    def _hidePrompt(self):
-        self.sendIO("//action:prompt_end")
+def _hidePrompt(self):
+    """Hide the currently displayed prompt."""
+    self.sendIO("//action:prompt_end")
