@@ -664,7 +664,7 @@ class BambuVirtualPrinter:
                 error = self._last_hms_errors[f"{n}-Error"].strip()
                 self.sendIO(f"// action:notification Print completed with error: {error}")
 
-def finalize_print_job(self):
+    def finalize_print_job(self):
         try:
             if self.current_print_job is not None:
                 # Save print statistics before cleanup
