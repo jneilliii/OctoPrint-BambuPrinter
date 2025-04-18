@@ -663,44 +663,8 @@ class BambuVirtualPrinter:
             for n in range(1, self._last_hms_errors["Count"] + 1):
                 error = self._last_hms_errors[f"{n}-Error"].strip()
                 self.sendIO(f"// action:notification Print completed with error: {error}")
-    def _trigger_change_state(self, new_state: APrinterState):
-        if self._current_state == new_state:
-            return
-            
-        self._log.info(
-            f"State transition: {self._current_state.__class__.__name__} -> "
-            f"{new_state.__class__.__name__}"
-        )
-        
-        try:
-            # Execute pre-transition hooks
-            self._execute_pre_state_change(new_state)
-            
-            # Perform state change
-            self._current_state.finalize()
-            self._current_state = new_state
-            self._current_state.init()
-            
-            # Execute post-transition hooks
-            self._execute_post_state_change()
-            
-        except Exception as e:
-            self._log.error(f"Error during state transition: {str(e)}")
-            # Attempt to recover to idle state
-            self._emergency_state_recovery()
 
-    def _execute_pre_state_change(self, new_state: APrinterState):
-        """Execute any necessary actions before state change"""
-        if isinstance(new_state, IdleState):
-            # Ensure cleanup when transitioning to idle
-            self._ensure_cleanup()
-
-    def _execute_post_state_change(self):
-        """Execute any necessary actions after state change"""
-        # Notify any observers about the state change
-        self.sendIO(f"// action:state_changed {self._current_state.__class__.__name__}")
-
-    def finalize_print_job(self):
+def finalize_print_job(self):
         try:
             if self.current_print_job is not None:
                 # Save print statistics before cleanup
@@ -750,3 +714,108 @@ class BambuVirtualPrinter:
         
         # Clear any cached data
         self._clear_print_cache()
+
+    def _create_temperature_message(self) -> str:
+        template = "{heater}:{actual:.2f}/ {target:.2f}"
+        temps = collections.OrderedDict()
+        temps["T"] = (self._telemetry.temp[0], self._telemetry.targetTemp[0])
+        temps["B"] = (self._telemetry.bedTemp, self._telemetry.bedTargetTemp)
+        if self._telemetry.hasChamber:
+            temps["C"] = (
+                self._telemetry.chamberTemp,
+                self._telemetry.chamberTargetTemp,
+            )
+
+        output = " ".join(
+            map(
+                lambda x: template.format(heater=x[0], actual=x[1][0], target=x[1][1]),
+                temps.items(),
+            )
+        )
+        output += " @:64\n"
+        return output
+
+    def _processTemperatureQuery(self) -> bool:
+        # includeOk = not self._okBeforeCommandOutput
+        if self.bambu_client.connected:
+            output = self._create_temperature_message()
+            self.sendIO(output)
+            return True
+        else:
+            return False
+
+    def close(self):
+        if self.bambu_client.connected:
+            self.bambu_client.disconnect()
+        self.change_state(self._state_idle)
+        self._serial_io.close()
+        self.stop()
+
+    def stop(self):
+        self._running = False
+        self._printer_thread.join()
+
+    def _wait_for_state_change(self):
+        self._state_change_queue.join()
+
+    def _printer_worker(self):
+        # self._create_client_connection_async()
+        self.sendIO("Printer connection complete")
+        while self._running:
+            try:
+                next_state = self._state_change_queue.get(timeout=0.01)
+                self._trigger_change_state(next_state)
+                self._state_change_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self._state_change_queue.task_done()
+                raise e
+        self._current_state.finalize()
+
+    def _trigger_change_state(self, new_state: APrinterState):
+        if self._current_state == new_state:
+            return
+            
+        self._log.info(
+            f"State transition: {self._current_state.__class__.__name__} -> "
+            f"{new_state.__class__.__name__}"
+        )
+        
+        try:
+            # Execute pre-transition hooks
+            self._execute_pre_state_change(new_state)
+            
+            # Perform state change
+            self._current_state.finalize()
+            self._current_state = new_state
+            self._current_state.init()
+            
+            # Execute post-transition hooks
+            self._execute_post_state_change()
+            
+        except Exception as e:
+            self._log.error(f"Error during state transition: {str(e)}")
+            # Attempt to recover to idle state
+            self._emergency_state_recovery()
+
+    def _execute_pre_state_change(self, new_state: APrinterState):
+        """Execute any necessary actions before state change"""
+        if isinstance(new_state, IdleState):
+            # Ensure cleanup when transitioning to idle
+            self._ensure_cleanup()
+
+    def _execute_post_state_change(self):
+        """Execute any necessary actions after state change"""
+        # Notify any observers about the state change
+        self.sendIO(f"// action:state_changed {self._current_state.__class__.__name__}")
+
+    def _showPrompt(self, text, choices):
+        self._hidePrompt()
+        self.sendIO(f"//action:prompt_begin {text}")
+        for choice in choices:
+            self.sendIO(f"//action:prompt_button {choice}")
+        self.sendIO("//action:prompt_show")
+
+    def _hidePrompt(self):
+        self.sendIO("//action:prompt_end")
