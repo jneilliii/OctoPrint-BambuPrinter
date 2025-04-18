@@ -889,39 +889,62 @@ class BambuVirtualPrinter:
     self._log.info("Stopping _printer_worker, finalizing current state.")
     self._current_state.finalize()
 
-def stop_worker(self):
-    """Stop the printer worker thread."""
-    self._running = False
-    self._printer_thread.join()
-    self._log.info("Printer worker thread stopped.")
+    def _printer_worker(self):
+        """Worker thread to process state changes and manage printer logic."""
+        self.sendIO("Printer connection complete")
+        while self._running:
+            try:
+                # Safely access the state change queue with a lock
+                with self._state_change_queue_lock:
+                    if not self._state_change_queue.empty():
+                        next_state = self._state_change_queue.get()
+                        self._log.debug(f"Processing state change to {type(next_state).__name__}")
+                        self._trigger_change_state(next_state)
+                        self._state_change_queue.task_done()
 
-def change_state(self, new_state: APrinterState):
-    """Change the current state of the printer."""
-    with self._state_change_queue_lock:
-        self._state_change_queue.put(new_state)
-        self._log.debug(f"Queued state change to {type(new_state).__name__}")
+                # Perform periodic tasks (e.g., check printer status)
+                self._log.debug("Performing periodic tasks in _printer_worker")
+                time.sleep(1)
 
-def _trigger_change_state(self, new_state: APrinterState):
-    """Trigger an immediate state change."""
-    if self._current_state == new_state:
-        self._log.debug(f"State is already {type(self._current_state).__name__}, skipping transition.")
-        return
+            except queue.Empty:
+                # No state changes, continue processing
+                continue
+            except Exception as e:
+                self._log.error(f"Error in _printer_worker: {e}", exc_info=True)
 
-    self._log.debug(
-        f"Changing state from {type(self._current_state).__name__} to {type(new_state).__name__}"
-    )
-    self._current_state.finalize()
-    self._current_state = new_state
-    self._current_state.init()
+        # Finalize the current state when the worker stops
+        self._log.info("Stopping _printer_worker, finalizing current state.")
+        self._current_state.finalize()
 
-def _showPrompt(self, text, choices):
-    """Display a prompt with text and choices."""
-    self._hidePrompt()
-    self.sendIO(f"//action:prompt_begin {text}")
-    for choice in choices:
-        self.sendIO(f"//action:prompt_button {choice}")
-    self.sendIO("//action:prompt_show")
+    def stop_worker(self):
+        """Stop the printer worker thread."""
+        self._running = False
+        self._printer_thread.join()
+        self._log.info("Printer worker thread stopped.")
 
-def _hidePrompt(self):
-    """Hide the currently displayed prompt."""
-    self.sendIO("//action:prompt_end")
+    def change_state(self, new_state: APrinterState):
+        """Change the current state of the printer."""
+        with self._state_change_queue_lock:
+            self._state_change_queue.put(new_state)
+            self._log.debug(f"Queued state change to {type(new_state).__name__}")
+
+    def _trigger_change_state(self, new_state: APrinterState):
+        if self._current_state == new_state:
+            return
+        self._log.debug(
+            f"Changing state from {self._current_state.__class__.__name__} to {new_state.__class__.__name__}"
+        )
+
+        self._current_state.finalize()
+        self._current_state = new_state
+        self._current_state.init()
+
+    def _showPrompt(self, text, choices):
+        self._hidePrompt()
+        self.sendIO(f"//action:prompt_begin {text}")
+        for choice in choices:
+            self.sendIO(f"//action:prompt_button {choice}")
+        self.sendIO("//action:prompt_show")
+
+    def _hidePrompt(self):
+        self.sendIO("//action:prompt_end")
