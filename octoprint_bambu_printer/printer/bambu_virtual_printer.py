@@ -75,6 +75,153 @@ class BambuVirtualPrinter:
         self._running = True
         self._print_status_reporter = None
         self._print_temp_reporter = None
+        self._state_change_queue_lock = threading.Lock()
+        self._printer_thread = threading.Thread(
+            target=self._printer_worker,
+            name="octoprint.plugins.bambu_printer.printer_state",
+        )
+        self._state_change_queue = queue.Queue()
+
+        self._current_print_job: PrintJob | None = None
+
+        self._serial_io = PrinterSerialIO(
+            handle_command_callback=self._process_gcode_serial_command,
+            settings=settings,
+            serial_log_handler=serial_log_handler,
+            read_timeout=read_timeout,
+            write_timeout=10.0,
+        )
+
+        self._telemetry = BambuPrinterTelemetry()
+        self._telemetry.hasChamber = printer_profile_manager.get_current().get(
+            "heatedChamber"
+        )
+
+        self.file_system = RemoteSDCardFileList(settings)
+        self._selected_project_file: FileInfo | None = None
+        self._project_files_view = (
+            CachedFileView(self.file_system, on_update=self._list_cached_project_files)
+            .with_filter("", ".3mf")
+            .with_filter("cache/", ".3mf")
+        )
+
+        self._serial_io.start()
+        self._printer_thread.start()
+
+        self._bambu_client: BambuClient = self._create_client_connection_async()
+
+    @property
+    def bambu_client(self):
+        return self._bambu_client
+
+    @property
+    def is_running(self):
+        return self._running
+
+    @property
+    def current_state(self):
+        return self._current_state
+
+    @property
+    def current_print_job(self):
+        return self._current_print_job
+
+    @current_print_job.setter
+    def current_print_job(self, value):
+        self._current_print_job = value
+
+    @property
+    def selected_file(self):
+        return self._selected_project_file
+
+    @property
+    def has_selected_file(self):
+        return self._selected_project_file is not None
+
+    @property
+    def timeout(self):
+        return self._serial_io._read_timeout
+
+    @timeout.setter
+    def timeout(self, value):
+        self._log.debug(f"Setting read timeout to {value}s")
+        self._serial_io._read_timeout = valuefrom __future__ import annotations
+
+import collections
+from dataclasses import dataclass, field, asdict
+import math
+from pathlib import Path
+import queue
+import re
+import threading
+import time
+from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
+from octoprint_bambu_printer.printer.file_system.file_info import FileInfo
+from octoprint_bambu_printer.printer.print_job import PrintJob
+from octoprint_bambu_printer.printer.pybambu import BambuClient, commands
+import logging
+import logging.handlers
+
+from octoprint.util import RepeatedTimer
+
+from octoprint_bambu_printer.printer.states.a_printer_state import APrinterState
+from octoprint_bambu_printer.printer.states.idle_state import IdleState
+
+from .printer_serial_io import PrinterSerialIO
+from .states.paused_state import PausedState
+from .states.printing_state import PrintingState
+
+from .gcode_executor import GCodeExecutor
+from .file_system.remote_sd_card_file_list import RemoteSDCardFileList
+
+
+AMBIENT_TEMPERATURE: float = 21.3
+
+
+@dataclass
+class BambuPrinterTelemetry:
+    temp: list[float] = field(default_factory=lambda: [AMBIENT_TEMPERATURE])
+    targetTemp: list[float] = field(default_factory=lambda: [0.0])
+    bedTemp: float = AMBIENT_TEMPERATURE
+    bedTargetTemp = 0.0
+    hasChamber: bool = False
+    chamberTemp: float = AMBIENT_TEMPERATURE
+    chamberTargetTemp: float = 0.0
+    lastTempAt: float = time.monotonic()
+    firmwareName: str = "Bambu"
+    extruderCount: int = 1
+    ams_current_tray: int = 255
+
+
+# noinspection PyBroadException
+class BambuVirtualPrinter:
+    gcode_executor = GCodeExecutor()
+
+    def __init__(
+        self,
+        settings,
+        printer_profile_manager,
+        data_folder,
+        serial_log_handler=None,
+        read_timeout=5.0,
+        faked_baudrate=115200,
+    ):
+        self._settings = settings
+        self._printer_profile_manager = printer_profile_manager
+        self._faked_baudrate = faked_baudrate
+        self._data_folder = data_folder
+        self._last_hms_errors = None
+        self._log = logging.getLogger("octoprint.plugins.bambu_printer.BambuPrinter")
+        self.ams_data = self._settings.get(["ams_data"])
+
+        self._state_idle = IdleState(self)
+        self._state_printing = PrintingState(self)
+        self._state_paused = PausedState(self)
+        self._current_state = self._state_idle
+
+        self._running = True
+        self._print_status_reporter = None
+        self._print_temp_reporter = None
         self._printer_thread = threading.Thread(
             target=self._printer_worker,
             name="octoprint.plugins.bambu_printer.printer_state",
@@ -145,6 +292,38 @@ class BambuVirtualPrinter:
     def timeout(self, value):
         self._log.debug(f"Setting read timeout to {value}s")
         self._serial_io._read_timeout = value
+
+    @property
+    def write_timeout(self):
+        return self._serial_io._write_timeout
+
+    @write_timeout.setter
+    def write_timeout(self, value):
+        self._log.debug(f"Setting write timeout to {value}s")
+        self._serial_io._write_timeout = value
+
+    @property
+    def port(self):
+        return "BAMBU"
+
+    @property
+    def baudrate(self):
+        return self._faked_baudrate
+
+    @property
+    def project_files(self):
+        return self._project_files_view
+
+    def change_state(self, new_state: APrinterState):
+        self._state_change_queue.put(new_state)
+
+    def new_update(self, event_type):
+        if event_type == "event_hms_errors":
+            self._update_hms_errors()
+        elif event_type == "event_printer_data_update":
+            self._update_printer_info()
+
+
 
     @property
     def write_timeout(self):
@@ -684,19 +863,44 @@ class BambuVirtualPrinter:
         self._state_change_queue.join()
 
     def _printer_worker(self):
-        # self._create_client_connection_async()
-        self.sendIO("Printer connection complete")
-        while self._running:
-            try:
-                next_state = self._state_change_queue.get(timeout=0.01)
-                self._trigger_change_state(next_state)
-                self._state_change_queue.task_done()
-            except queue.Empty:
-                continue
-            except Exception as e:
-                self._state_change_queue.task_done()
-                raise e
-        self._current_state.finalize()
+    """Worker thread to process state changes and manage printer logic."""
+    self.sendIO("Printer connection complete")
+    while self._running:
+        try:
+            # Safely access the state change queue with a lock
+            with self._state_change_queue_lock:
+                if not self._state_change_queue.empty():
+                    next_state = self._state_change_queue.get()
+                    self._log.debug(f"Processing state change to {type(next_state).__name__}")
+                    self._trigger_change_state(next_state)
+                    self._state_change_queue.task_done()
+
+            # Perform periodic tasks (e.g., check printer status)
+            self._log.debug("Performing periodic tasks in _printer_worker")
+            time.sleep(1)
+
+        except queue.Empty:
+            # No state changes, continue processing
+            continue
+        except Exception as e:
+            self._log.error(f"Error in _printer_worker: {e}", exc_info=True)
+
+    # Finalize the current state when the worker stops
+    self._log.info("Stopping _printer_worker, finalizing current state.")
+    self._current_state.finalize()
+
+    def stop_worker(self):
+    """Stop the printer worker thread."""
+    self._running = False
+    self._printer_thread.join()
+    self._log.info("Printer worker thread stopped.")
+
+# Thread-safe state change method
+def change_state(self, new_state: APrinterState):
+    """Change the current state of the printer."""
+    with self._state_change_queue_lock:
+        self._state_change_queue.put(new_state)
+        self._log.debug(f"Queued state change to {type(new_state).__name__}")
 
     def _trigger_change_state(self, new_state: APrinterState):
         if self._current_state == new_state:
