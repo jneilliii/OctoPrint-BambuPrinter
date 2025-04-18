@@ -631,13 +631,14 @@ class BambuVirtualPrinter:
         self.sendIO("Done printing file")
 
     def finalize_print_job(self):
-    if self.current_print_job is not None:
-        self.report_print_job_status()
-        self.report_print_finished()
-        self.current_print_job = None
-        self.report_print_job_status()
-    self._selected_project_file = None  # Deselect the file
-    self.change_state(self._state_idle)
+        if self.current_print_job is not None:
+            self.report_print_job_status()
+            self.report_print_finished()
+            self.current_print_job = None
+            self.report_print_job_status()
+            self._selected_project_file = None
+            self.remove_project_selection()
+        self.change_state(self._state_idle)
 
     def _create_temperature_message(self) -> str:
         template = "{heater}:{actual:.2f}/ {target:.2f}"
