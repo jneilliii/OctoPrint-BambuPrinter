@@ -895,8 +895,8 @@ class BambuVirtualPrinter:
     self._printer_thread.join()
     self._log.info("Printer worker thread stopped.")
 
-# Thread-safe state change method
-def change_state(self, new_state: APrinterState):
+
+    def change_state(self, new_state: APrinterState):
     """Change the current state of the printer."""
     with self._state_change_queue_lock:
         self._state_change_queue.put(new_state)
