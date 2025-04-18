@@ -665,55 +665,12 @@ class BambuVirtualPrinter:
                 self.sendIO(f"// action:notification Print completed with error: {error}")
 
     def finalize_print_job(self):
-        try:
-            if self.current_print_job is not None:
-                # Save print statistics before cleanup
-                self._save_print_statistics()
-                
-                # Report final status
-                self.report_print_job_status()
-                self.report_print_finished()
-                
-                # Cleanup resources
-                self._cleanup_print_resources()
-                
-                # Reset state
-                self.current_print_job = None
-                self.report_print_job_status()
-                
-            # Ensure state change happens even if print job was None
+        if self.current_print_job is not None:
+            self.report_print_job_status()
+            self.report_print_finished()
+            self.current_print_job = None
+            self.report_print_job_status()
             self.change_state(self._state_idle)
-        except Exception as e:
-            self._log.error(f"Error during print finalization: {str(e)}")
-            # Still try to change state even if there was an error
-            self.change_state(self._state_idle)
-            raise
-
-    def _save_print_statistics(self):
-        """Save print statistics for historical tracking"""
-        if self.current_print_job:
-            stats = {
-                "filename": self.current_print_job.file_info.file_name,
-                "print_time": time.time() - self.current_print_job.start_time,
-                "completion_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "successful": True  # Could be parameter based on print outcome
-            }
-            # Log statistics for future reference
-            self._log.info(f"Print statistics: {stats}")
-            # Could save to database or file system
-
-    def _cleanup_print_resources(self):
-        """Clean up resources used during printing"""
-        # Stop any active reporters
-        self.stop_continuous_status_report()
-        self.stop_continuous_temp_report()
-        
-        # Reset temperatures if configured
-        if self._settings.get_boolean(["reset_temperatures_on_complete"]):
-            self._reset_temperatures()
-        
-        # Clear any cached data
-        self._clear_print_cache()
 
     def _create_temperature_message(self) -> str:
         template = "{heater}:{actual:.2f}/ {target:.2f}"
@@ -759,7 +716,7 @@ class BambuVirtualPrinter:
         self._state_change_queue.join()
 
     def _printer_worker(self):
-     self._create_client_connection_async()
+        self._create_client_connection_async()
         self.sendIO("Printer connection complete")
         while self._running:
             try:
@@ -776,39 +733,13 @@ class BambuVirtualPrinter:
     def _trigger_change_state(self, new_state: APrinterState):
         if self._current_state == new_state:
             return
-            
-        self._log.info(
-            f"State transition: {self._current_state.__class__.__name__} -> "
-            f"{new_state.__class__.__name__}"
+        self._log.debug(
+            f"Changing state from {self._current_state.__class__.__name__} to {new_state.__class__.__name__}"
         )
-        
-        try:
-            # Execute pre-transition hooks
-            self._execute_pre_state_change(new_state)
-            
-            # Perform state change
-            self._current_state.finalize()
-            self._current_state = new_state
-            self._current_state.init()
-            
-            # Execute post-transition hooks
-            self._execute_post_state_change()
-            
-        except Exception as e:
-            self._log.error(f"Error during state transition: {str(e)}")
-            # Attempt to recover to idle state
-            self._emergency_state_recovery()
 
-    def _execute_pre_state_change(self, new_state: APrinterState):
-        """Execute any necessary actions before state change"""
-        if isinstance(new_state, IdleState):
-            # Ensure cleanup when transitioning to idle
-            self._ensure_cleanup()
-
-    def _execute_post_state_change(self):
-        """Execute any necessary actions after state change"""
-        # Notify any observers about the state change
-        self.sendIO(f"// action:state_changed {self._current_state.__class__.__name__}")
+        self._current_state.finalize()
+        self._current_state = new_state
+        self._current_state.init()
 
     def _showPrompt(self, text, choices):
         self._hidePrompt()
