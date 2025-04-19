@@ -17,4 +17,34 @@ You need to set up the scripts with your information.
 
 Bambu lan access code
 Bambu printer IP
-install a python environment at the location of
+install a python environment at the location of /home/$USER/bambucam/bin/activate
+#Install Python environment 
+```sh
+sudo apt update
+sudo apt install python3-venv
+```
+
+```sh
+python3 -m venv /home/$USER/bambucam
+```
+
+#It will appear like this
+
+```sh
+/home/$USER/bambucam/
+├── bin/
+│   ├── activate
+│   ├── python
+│   └── pip
+└── lib/
+    └── pythonX.Y/
+```
+
+#To activate manually 
+
+```sh
+source /home/$USER/bambucam/bin/activate
+```
+
+
+
