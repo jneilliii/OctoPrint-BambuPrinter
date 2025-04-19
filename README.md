@@ -18,7 +18,7 @@ You need to set up the scripts with your information.
 Bambu lan access code
 Bambu printer IP
 install a python environment at the location of /home/$USER/bambucam/bin/activate
-#Install Python environment 
+## Install Python environment 
 ```sh
 sudo apt update
 sudo apt install python3-venv
@@ -28,7 +28,7 @@ sudo apt install python3-venv
 python3 -m venv /home/$USER/bambucam
 ```
 
-#It will appear like this
+## It will appear like this
 
 ```sh
 /home/$USER/bambucam/
@@ -40,7 +40,7 @@ python3 -m venv /home/$USER/bambucam
     └── pythonX.Y/
 ```
 
-#To activate manually 
+## To activate manually 
 
 ```sh
 # Activate environment
@@ -53,12 +53,12 @@ pip install flask opencv-python requests watchdog
 # Deactivate when finished
 deactivate
 ```
-##Set up paths
+## Set up paths
 ```sh
 VENV_PATH = "/home/your_username/bambucam/bin/activate"  # Replace your_username
 SCRIPT_PATH = "/path/to/your/bambucam.py"  # Set your actual script path
 ```
-##Test the env activation 
+## Test the env activation 
 
 ```sh
 source ~/bambucam/bin/activate
@@ -66,7 +66,7 @@ python --version  # Should show Python 3.x
 which pip        # Should show path to your venv
 deactivate
 ```
-##start up script for BambuCAM
+## Start up script for BambuCAM
 ```sh
 # Make script executable
 chmod +x auto-bambu-cam.sh
