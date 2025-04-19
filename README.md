@@ -12,11 +12,15 @@ Install manually using this URL:
 
     https://github.com/jneilliii/OctoPrint-BambuPrinter/archive/master.zip
 
+## I plan to make a config file soon for easier set up.
+## Ensure your putting working-watchdog.py, bambucam.py and auto-bambu-cam.sh to be in yiur home directory for east access. 
 
-You need to set up the scripts with your information.
+You need to set up the scripts with your information. 
 
 Bambu lan access code
+
 Bambu printer IP
+
 install a python environment at the location of /home/$USER/bambucam/bin/activate
 ## Install Python environment 
 ```sh
