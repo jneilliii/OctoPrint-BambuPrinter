@@ -1,6 +1,6 @@
 #!/bin/bash
 
-source /home/cody/bambucam/bin/activate
+source /home/$USER/bambucam/bin/activate
 
-python /home/cody/bambucam.py
+python /home/$USER/bambucam.py
 
