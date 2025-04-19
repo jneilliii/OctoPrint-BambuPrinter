@@ -43,8 +43,35 @@ python3 -m venv /home/$USER/bambucam
 #To activate manually 
 
 ```sh
-source /home/$USER/bambucam/bin/activate
+# Activate environment
+source ~/bambucam/bin/activate
+
+# Install core dependencies
+pip install --upgrade pip
+pip install flask opencv-python requests watchdog
+
+# Deactivate when finished
+deactivate
 ```
+##Set up paths
+```sh
+VENV_PATH = "/home/your_username/bambucam/bin/activate"  # Replace your_username
+SCRIPT_PATH = "/path/to/your/bambucam.py"  # Set your actual script path
+```
+##Test the env activation 
 
+```sh
+source ~/bambucam/bin/activate
+python --version  # Should show Python 3.x
+which pip        # Should show path to your venv
+deactivate
+```
+##start up script for BambuCAM
+```sh
+# Make script executable
+chmod +x auto-bambu-cam.sh
 
+# Start the service
+./auto-bambu-cam.sh
+```
 
