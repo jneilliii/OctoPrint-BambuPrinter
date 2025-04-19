@@ -1,6 +1,4 @@
 #!/bin/bash
 
-source /home/$USER/bambucam/bin/activate
-
-python /home/$USER/bambucam.py
-
+source "$HOME/bambucam/bin/activate"
+python3 "$HOME/bambucam.py"
