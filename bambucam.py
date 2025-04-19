@@ -4,7 +4,7 @@ from flask import Flask, Response, request
 app = Flask(__name__)
 
 # RTSP URL to your Bambu Lab stream
-RTSP_URL = "rtsps://bblp:59008066@192.168.2.242:322/streaming/live/1"
+RTSP_URL = "rtsps://bblp:<ACCESS_CODE>@192.168.X.XXX:322/streaming/live/1"
 
 def generate_frames():
     cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
