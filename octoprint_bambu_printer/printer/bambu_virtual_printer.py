@@ -624,45 +624,11 @@ class BambuVirtualPrinter:
 
     def report_print_finished(self):
         if self.current_print_job is None:
-            self._log.warning("Attempted to report print finished with no active print job")
             return
-            
-        try:
-            self._log.info(
-                f"Print job finished: {self.current_print_job.file_info.file_name}, "
-                f"Duration: {time.time() - self.current_print_job.start_time:.2f}s"
-            )
-            
-            # Check for any errors during print
-            if self._check_print_errors():
-                self.sendIO("Print completed with errors")
-                self._notify_print_errors()
-            else:
-                self.sendIO("Done printing file")
-                
-            # Trigger any post-print actions
-            self._execute_post_print_actions()
-            
-        except Exception as e:
-            self._log.error(f"Error in report_print_finished: {str(e)}")
-            self.sendIO("Error occurred while finishing print")
-
-    def _check_print_errors(self):
-        """Check for any errors that occurred during printing"""
-        if not self.current_print_job:
-            return False
-            
-        return (
-            self.current_print_job.error_count > 0 or
-            self._last_hms_errors is not None
+        self._log.debug(
+            f"SD File Print finishing: {self.current_print_job.file_info.file_name}"
         )
-
-    def _notify_print_errors(self):
-        """Notify user of any errors that occurred during printing"""
-        if self._last_hms_errors:
-            for n in range(1, self._last_hms_errors["Count"] + 1):
-                error = self._last_hms_errors[f"{n}-Error"].strip()
-                self.sendIO(f"// action:notification Print completed with error: {error}")
+        self.sendIO("Done printing file")
 
     def finalize_print_job(self):
         if self.current_print_job is not None:
@@ -670,7 +636,7 @@ class BambuVirtualPrinter:
             self.report_print_finished()
             self.current_print_job = None
             self.report_print_job_status()
-            self.change_state(self._state_idle)
+        self.change_state(self._state_idle)
 
     def _create_temperature_message(self) -> str:
         template = "{heater}:{actual:.2f}/ {target:.2f}"
@@ -716,7 +682,7 @@ class BambuVirtualPrinter:
         self._state_change_queue.join()
 
     def _printer_worker(self):
-        self._create_client_connection_async()
+        # self._create_client_connection_async()
         self.sendIO("Printer connection complete")
         while self._running:
             try:
