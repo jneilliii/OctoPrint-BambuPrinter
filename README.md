@@ -13,7 +13,7 @@ Install manually using this URL:
     https://github.com/jneilliii/OctoPrint-BambuPrinter/archive/master.zip
 
 ## I plan to make a config file soon for easier set up.
-## Ensure your putting working-watchdog.py, bambucam.py and auto-bambu-cam.sh to be in yiur home directory for east access. 
+## Ensure your putting working-watchdog.py, bambucam.py and auto-bambu-cam.sh to be in yiur home directory for easy access. 
 
 You need to set up the scripts with your information. 
 
