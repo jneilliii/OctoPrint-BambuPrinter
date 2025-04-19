@@ -6,7 +6,7 @@ This plugin is an attempt to connect BambuLab printers to OctoPrint. It's still 
 
 ## About This Repository
 
-This repository hosts OctoPrint-BambuPrinter, a plugin designed to bridge the gap between OctoPrint and Bambu Lab 3D printers. OctoPrint is a powerful web-based interface used primarily on Raspberry Pi mini-PCs to control and monitor 3D printers. It provides remote access, G-code streaming, webcam monitoring, plugin support, and more—making it a popular choice for makers and 3D printing enthusiasts looking to enhance the capabilities of their printers.
+This repository hosts OctoPrint-BambuPrinter, a plugin designed to bridge the gap between OctoPrint and Bambu Lab 3D printers. [OctoPrint](https://octoprint.org) is a powerful web-based interface used primarily on Raspberry Pi mini-PCs to control and monitor 3D printers. It provides remote access, G-code streaming, webcam monitoring, plugin support, and more—making it a popular choice for makers and 3D printing enthusiasts looking to enhance the capabilities of their printers.
 
 ## What This Plugin Does
 
