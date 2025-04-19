@@ -1,0 +1,3 @@
+# — bambucam.py (install into /home/$USER/bambucam venv) —
+Flask
+opencv-python
