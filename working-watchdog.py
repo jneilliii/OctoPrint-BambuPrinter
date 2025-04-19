@@ -9,8 +9,8 @@ from datetime import datetime
 import requests
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
-WATCH_DIR      = "/octoprint/octoprint/uploads"
-API_KEY        = "pulPBiro__eMOehycoWph3B9THB2ceLXJWyi4eSHhC8"
+WATCH_DIR      = "/octoprint/octoprint/uploads" # Make sure you find out where your Uploads folder is!!
+API_KEY        = "ENTER_YOUR_OCTOPRINT_API"                      
 API_URL_SD     = "http://localhost:80/api/files/sdcard"
 API_JOB       = "http://localhost:80/api/job"
 LOG_FILE       = os.path.expanduser("~/print_watcher.log")
