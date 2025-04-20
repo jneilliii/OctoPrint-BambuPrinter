@@ -610,6 +610,7 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M524")
     def _cancel_print(self):
         self._current_state.cancel_print()
+        time.sleep(5)
         self.remove_project_selection()
         return True
 
