@@ -1,5 +1,6 @@
 from __future__ import absolute_import, annotations
 
+from .print_watcher import PrintWatcher
 import json
 from pathlib import Path
 import threading
