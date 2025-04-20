@@ -57,10 +57,9 @@ Install manually using this URL:
 
     https://github.com/jneilliii/OctoPrint-BambuPrinter/archive/master.zip
 
-## I plan to make a config file soon for easier set up.
-## Ensure your putting working-watchdog.py, bambucam.py and auto-bambu-cam.sh to be in your home directory for easy access. 
+## Go to BambuONEclickADDon&CAM folder
 
-You need to set up the scripts with your information. 
+You need to set up the script with your information for bambucam.py
 
 Bambu lan access code
 
@@ -105,22 +104,22 @@ deactivate
 ## Set up paths
 ```sh
 VENV_PATH = "/home/your_username/bambucam/bin/activate"  # Replace your_username
-SCRIPT_PATH = "/path/to/your/bambucam.py"  # Set your actual script path
+SCRIPT_PATH = "/home/your_username/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/bambucam.py"  # Set your actual script path
 ```
-## Test the env activation 
+## Test the env activation and install requirements 
 
 ```sh
 source ~/bambucam/bin/activate
-python --version  # Should show Python 3.x
-which pip        # Should show path to your venv
-deactivate
+pip install -r requirements-bambucam.txt
+pip install -r requirements-watchdog.txt
 ```
-## Start up script for BambuCAM
+## Start up script for BambuCAM+watchdog
 ```sh
 # Make script executable
-chmod +x auto-bambu-cam.sh
+chmod +x auto-bambu-cam-and-watchdog.sh
 
 # Start the service
-./auto-bambu-cam.sh
+./auto-bambu-cam-and-watchdog.sh
 ```
+## Running working-watchdog.py at start-up 
 
