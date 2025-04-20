@@ -1,6 +1,5 @@
 from __future__ import absolute_import, annotations
 
-from .print_watcher import PrintWatcher
 import json
 from pathlib import Path
 import threading
@@ -49,6 +48,7 @@ def measure_elapsed():
     yield _get_elapsed
     print(f"Total elapsed: {_get_elapsed()}")
 
+
 class BambuPrintPlugin(
     octoprint.plugin.SettingsPlugin,
     octoprint.plugin.TemplatePlugin,
@@ -62,7 +62,6 @@ class BambuPrintPlugin(
     _bambu_file_system: RemoteSDCardFileList
     _timelapse_files_view: CachedFileView
     _bambu_cloud: None
-    watcher: PrintWatcher  # Initialize the PrintWatcher
 
     def on_settings_initialized(self):
         self._bambu_file_system = RemoteSDCardFileList(self._settings)
@@ -74,7 +73,8 @@ class BambuPrintPlugin(
 
     def get_assets(self):
         return {"js": ["js/jquery-ui.min.js", "js/knockout-sortable.1.2.0.js", "js/bambu_printer.js"],
-                "css": ["css/bambu_printer.css"]}
+                "css": ["css/bambu_printer.css"]
+                }
 
     def get_template_configs(self):
         return [
@@ -274,4 +274,87 @@ class BambuPrintPlugin(
         return [self.get_timelapse_file_list]
 
     def _download_file(self, file_name: str, source_path: str):
-        destination =
+        destination = Path(self.get_plugin_data_folder()) / file_name
+        if destination.exists():
+            return destination
+
+        with self._bambu_file_system.get_ftps_client() as ftp:
+            ftp.download_file(
+                source=(Path(source_path) / file_name).as_posix(),
+                dest=destination.as_posix(),
+            )
+        return destination
+
+    @octoprint.plugin.BlueprintPlugin.route("/timelapse/<filename>", methods=["GET"])
+    @octoprint.server.util.flask.restricted_access
+    @no_firstrun_access
+    @Permissions.TIMELAPSE_DOWNLOAD.require(403)
+    def downloadTimelapse(self, filename):
+        self._download_file(filename, "timelapse/")
+        return flask.redirect(
+            "/plugin/bambu_printer/download/timelapse/" + urlquote(filename), code=302
+        )
+
+    @octoprint.plugin.BlueprintPlugin.route("/thumbnail/<filename>", methods=["GET"])
+    @octoprint.server.util.flask.restricted_access
+    @no_firstrun_access
+    @Permissions.TIMELAPSE_DOWNLOAD.require(403)
+    def downloadThumbnail(self, filename):
+        self._download_file(filename, "timelapse/thumbnail/")
+        return flask.redirect(
+            "/plugin/bambu_printer/download/thumbnail/" + urlquote(filename), code=302
+        )
+
+    def is_blueprint_csrf_protected(self):
+        return True
+
+    def route_hook(self, server_routes, *args, **kwargs):
+        return [
+            (
+                r"/download/timelapse/(.*)",
+                LargeResponseHandler,
+                {
+                    "path": self.get_plugin_data_folder(),
+                    "as_attachment": True,
+                    "path_validation": path_validation_factory(
+                        lambda path: not is_hidden_path(path), status_code=404
+                    ),
+                },
+            ),
+            (
+                r"/download/thumbnail/(.*)",
+                LargeResponseHandler,
+                {
+                    "path": self.get_plugin_data_folder(),
+                    "as_attachment": True,
+                    "path_validation": path_validation_factory(
+                        lambda path: not is_hidden_path(path), status_code=404
+                    ),
+                },
+            ),
+        ]
+
+    def get_update_information(self):
+        return {
+            "bambu_printer": {
+                "displayName": "Bambu Printer",
+                "displayVersion": self._plugin_version,
+                "type": "github_release",
+                "user": "jneilliii",
+                "repo": "OctoPrint-BambuPrinter",
+                "current": self._plugin_version,
+                "stable_branch": {
+                    "name": "Stable",
+                    "branch": "master",
+                    "comittish": ["master"],
+                },
+                "prerelease_branches": [
+                    {
+                        "name": "Release Candidate",
+                        "branch": "rc",
+                        "comittish": ["rc", "master"],
+                    }
+                ],
+                "pip": "https://github.com/jneilliii/OctoPrint-BambuPrinter/archive/{target_version}.zip",
+            }
+        }
