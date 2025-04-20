@@ -16,6 +16,7 @@ import octoprint.server
 import octoprint.plugin
 from octoprint.events import Events
 import octoprint.settings
+from octoprint.settings import valid_boolean_trues
 from octoprint.util import is_hidden_path
 from octoprint.server.util.flask import no_firstrun_access
 from octoprint.server.util.tornado import (
@@ -269,6 +270,20 @@ class BambuPrintPlugin(
             thread = threading.Thread(target=process)
             thread.daemon = True
             thread.start()
+
+    def after_request(self, response, *args, **kwargs):
+        if flask.request.path.startswith("/api/files/local") and flask.request.method == "POST" and response.status_code == 201:
+            path = os.path.join(self._settings.getBaseFolder("uploads"), flask.request.values.get("path"), flask.request.values.get("file.name"))
+            filename = flask.request.values.get("file.name")
+            with self._bambu_file_system.get_ftps_client() as ftp:
+                if ftp.upload_file(path, f"{filename}"):
+                    if flask.request.values.get("print", False) in valid_boolean_trues:
+                        self._printer.select_file(filename, True, printAfterSelect=flask.request.values.get("print", False) in valid_boolean_trues)
+
+        return response
+
+    def _hook_octoprint_server_api_after_request(self, *args, **kwargs):
+        return [self.after_request]
 
     def _hook_octoprint_server_api_before_request(self, *args, **kwargs):
         return [self.get_timelapse_file_list]
