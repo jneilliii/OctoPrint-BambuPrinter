@@ -1,3 +1,0 @@
-# — working-watchdog.py (install into your OctoPrint env) —
-watchdog
-requests
