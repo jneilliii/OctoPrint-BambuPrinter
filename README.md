@@ -52,7 +52,7 @@ Structured for modularity and future expansions like AMS control, print queuing,
 * Python 3.9 or higher (OctoPi 1.0.0)
 
 ## Setup
-
+## install the plugin using the " from URL " section in plugin manger
 Install manually using this URL:
 
     https://github.com/CodeMasterCody3D/OctoPrint-BambuPrinter/archive/refs/heads/rc.zip
@@ -106,4 +106,27 @@ mkdir -p "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM" && curl -sSL "htt
 ```sh
 mkdir -p "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM" && curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/auto-bambu-cam.sh" -o "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/auto-bambu-cam.sh" && chmod +x "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/auto-bambu-cam.sh"
 ```
+## Download an extra plugin if you dont know how to run things in a terminal or get intoo your terminal.
+## CMD exec plgin
+## install the plugin using the " from URL " section in plugin manger.
 
+```sh
+https://github.com/alexis-coulombe/Octoprint-CmdExec/archive/master.zip
+```
+## Navigate to the plugin for CMD exec
+You will see
+## First command:
+set the forst command as
+```sh
+bash "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/auto-bambu-cam.sh" &
+```
+## Navbar Icon:
+set the navbar icon to be a camera icon
+
+## Tooltip text
+set the test in the tool too as
+
+```sh
+Bambu Cam
+```
+## You can start your camera using the camera icon at the top of the page
