@@ -121,4 +121,21 @@ set the test in the tool too as
 ```sh
 Bambu Cam
 ```
+
+Click Save
+
+## Go to classic webcam 
+This will be your webcam stream URL
+
+```sh
+http://YOUR_OCTOPRINT_IP:8183/webcam/?action=stream
+```
+
+This will be your snap shot URL
+
+```sh
+http://YOUR_OCTOPRINT_IP:8183/webcam/?action=snapshot
+```
+Click Save
+
 ## You can start your camera using the camera icon at the top of the page
