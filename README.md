@@ -145,3 +145,27 @@ http://YOUR_OCTOPRINT_IP:8183/webcam/?action=snapshot
 Click Save
 
 ## You can start your camera using the camera icon at the top of the page
+
+
+
+## Alternatively you can run these commands with CMD exec pasting them in the bash command section one by one, once you click save you can click the icon at the top and it will execute the command for you. 
+
+##  Install python requirements 
+
+```sh
+source ~/bambucam/bin/activate && curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/requirements-bambucam.txt" -o requirements.txt && pip install -r requirements.txt
+```
+
+## Download script for bambucam.py
+```sh
+mkdir -p "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM" && curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/bambucam.py" -o "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/bambucam.py"
+
+# Start the service
+./auto-bambu-cam-and-watchdog.sh
+```
+
+## Download auto-bambu-cam.sh script
+
+```sh
+mkdir -p "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM" && curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/auto-bambu-cam.sh" -o "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/auto-bambu-cam.sh" && chmod +x "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/auto-bambu-cam.sh"
+```
