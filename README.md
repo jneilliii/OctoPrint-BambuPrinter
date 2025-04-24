@@ -57,15 +57,7 @@ Install manually using this URL:
 
     https://github.com/CodeMasterCody3D/OctoPrint-BambuPrinter/archive/refs/heads/rc.zip
 
-## Go to BambuONEclickADDon&CAM folder
 
-You need to set up the script with your information for bambucam.py
-
-Bambu lan access code
-
-Bambu printer IP
-
-install a python environment at the location of /home/$USER/bambucam/bin/activate
 ## Install Python environment 
 ## Ubuntu/Debian/Octopi
 
