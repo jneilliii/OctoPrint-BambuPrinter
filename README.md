@@ -55,7 +55,7 @@ Structured for modularity and future expansions like AMS control, print queuing,
 
 Install manually using this URL:
 
-    https://github.com/jneilliii/OctoPrint-BambuPrinter/archive/master.zip
+    https://github.com/CodeMasterCody3D/OctoPrint-BambuPrinter/archive/refs/heads/rc.zip
 
 ## Go to BambuONEclickADDon&CAM folder
 
@@ -67,25 +67,16 @@ Bambu printer IP
 
 install a python environment at the location of /home/$USER/bambucam/bin/activate
 ## Install Python environment 
+## Ubuntu/Debian/Octopi
+
 ```sh
-sudo apt update
-sudo apt install python3-venv
+curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/install_bambucam_env.sh" -o install_bambucam_env.sh && chmod +x install_bambucam_env.sh && ./install_bambucam_env.sh
 ```
 
-```sh
-python3 -m venv /home/$USER/bambucam
-```
-
-## It will appear like this
+## Octoprint Docker
 
 ```sh
-/home/$USER/bambucam/
-├── bin/
-│   ├── activate
-│   ├── python
-│   └── pip
-└── lib/
-    └── pythonX.Y/
+curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/install_bambucam_env_docker.sh" -o install_bambucam_env_docker.sh && chmod +x install_bambucam_env_docker.sh && ./install_bambucam_env_docker.sh
 ```
 
 ## To activate manually 
@@ -94,32 +85,25 @@ python3 -m venv /home/$USER/bambucam
 # Activate environment
 source ~/bambucam/bin/activate
 
-# Install core dependencies
-pip install --upgrade pip
-pip install flask opencv-python requests watchdog
-
 # Deactivate when finished
 deactivate
 ```
-## Set up paths
-```sh
-VENV_PATH = "/home/your_username/bambucam/bin/activate"  # Replace your_username
-SCRIPT_PATH = "/home/your_username/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/bambucam.py"  # Set your actual script path
-```
-## Test the env activation and install requirements 
+
+##  Install python requirements 
 
 ```sh
-source ~/bambucam/bin/activate
-pip install -r requirements-bambucam.txt
-pip install -r requirements-watchdog.txt
+source ~/bambucam/bin/activate && curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/requirements-bambucam.txt" -o requirements.txt && pip install -r requirements.txt
 ```
-## Start up script for BambuCAM+watchdog
+## Download script for bambucam.py
 ```sh
-# Make script executable
-chmod +x auto-bambu-cam-and-watchdog.sh
+mkdir -p "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM" && curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/bambucam.py" -o "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/bambucam.py"
 
 # Start the service
 ./auto-bambu-cam-and-watchdog.sh
 ```
-## Running working-watchdog.py at start-up 
+## Download auto-bambu-cam.sh script
+
+```sh
+mkdir -p "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM" && curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/auto-bambu-cam.sh" -o "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/auto-bambu-cam.sh" && chmod +x "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/auto-bambu-cam.sh"
+```
 
