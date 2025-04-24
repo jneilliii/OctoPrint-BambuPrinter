@@ -65,14 +65,8 @@ Install manually using this URL:
 curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/install_bambucam_env.sh" -o install_bambucam_env.sh && chmod +x install_bambucam_env.sh && ./install_bambucam_env.sh
 ```
 
-## Octoprint Docker
-
-```sh
-curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/install_bambucam_env_docker.sh" -o install_bambucam_env_docker.sh && chmod +x install_bambucam_env_docker.sh && ./install_bambucam_env_docker.sh
-```
-
 ## To activate manually 
-
+## Ubuntu/Debian
 ```sh
 # Activate environment
 source ~/bambucam/bin/activate
@@ -82,17 +76,20 @@ deactivate
 ```
 
 ##  Install python requirements 
+## Docker
 
+```sh
+pip install opencv-python
+```
+## Ubuntu/debian
 ```sh
 source ~/bambucam/bin/activate && curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/requirements-bambucam.txt" -o requirements.txt && pip install -r requirements.txt
 ```
 
 ## Download script for bambucam.py
+
 ```sh
 mkdir -p "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM" && curl -sSL "https://raw.githubusercontent.com/CodeMasterCody3D/OctoPrint-BambuPrinter/refs/heads/rc/BambuONEclickADDon%26CAM/bambucam.py" -o "$HOME/OctoPrint-BambuPrinter/BambuONEclickADDon&CAM/bambucam.py"
-
-# Start the service
-./auto-bambu-cam-and-watchdog.sh
 ```
 
 ## Download auto-bambu-cam.sh script
