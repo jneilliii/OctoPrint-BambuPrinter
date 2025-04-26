@@ -35,6 +35,7 @@ from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import
 
 from .printer.file_system.bambu_timelapse_file_info import (
     BambuTimelapseFileInfo,
+    FileInfo
 )
 from .printer.bambu_virtual_printer import BambuVirtualPrinter
 
@@ -62,15 +63,21 @@ class BambuPrintPlugin(
     _plugin_manager: octoprint.plugin.PluginManager
     _bambu_file_system: RemoteSDCardFileList
     _timelapse_files_view: CachedFileView
+    _project_files_view: CachedFileView
     _bambu_cloud: None
 
     def on_settings_initialized(self):
         self._bambu_file_system = RemoteSDCardFileList(self._settings)
         self._timelapse_files_view = CachedFileView(self._bambu_file_system)
+        self._project_files_view = CachedFileView(self._bambu_file_system, on_update=self._update_file_list)
+
         if self._settings.get(["device_type"]) in ["X1", "X1C"]:
             self._timelapse_files_view.with_filter("timelapse/", ".mp4")
         else:
             self._timelapse_files_view.with_filter("timelapse/", ".avi")
+
+    def _update_file_list(self):
+        self._printer.commands("M20 L T", force=True)
 
     def get_assets(self):
         return {"js": ["js/jquery-ui.min.js", "js/knockout-sortable.1.2.0.js", "js/bambu_printer.js"],
@@ -174,12 +181,13 @@ class BambuPrintPlugin(
         elif event == Events.FILE_ADDED:
             if payload["operation"] == "add" and "3mf" in payload["type"]:
                 file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
-                with zipfile.ZipFile(file_container) as z:
-                    with z.open("Metadata/plate_1.json", "r") as json_data:
-                        plate_data = json.load(json_data)
+                if os.path.exists(file_container):
+                    with zipfile.ZipFile(file_container) as z:
+                        with z.open("Metadata/plate_1.json", "r") as json_data:
+                            plate_data = json.load(json_data)
 
-                if plate_data:
-                    self._file_manager.set_additional_metadata("sdcard", payload["path"], "plate_data", plate_data, overwrite=True)
+                    if plate_data:
+                        self._file_manager.set_additional_metadata("sdcard", payload["path"], "plate_data", plate_data, overwrite=True)
 
     def support_3mf_files(self):
         return {"machinecode": {"3mf": ["3mf"]}}
@@ -276,9 +284,11 @@ class BambuPrintPlugin(
             path = os.path.join(self._settings.getBaseFolder("uploads"), flask.request.values.get("path"), flask.request.values.get("file.name"))
             filename = flask.request.values.get("file.name")
             with self._bambu_file_system.get_ftps_client() as ftp:
-                if ftp.upload_file(path, f"{filename}"):
+                if ftp.upload_file(path, filename):
+                    self._project_files_view.with_filter("", ".3mf")
+                    file_info = self._project_files_view.get_file_by_name(filename)
                     if flask.request.values.get("print", False) in valid_boolean_trues:
-                        self._printer.select_file(filename, True, printAfterSelect=flask.request.values.get("print", False) in valid_boolean_trues)
+                        self._printer.select_file(file_info.dosname, True, printAfterSelect=flask.request.values.get("print", False) in valid_boolean_trues)
 
         return response
 

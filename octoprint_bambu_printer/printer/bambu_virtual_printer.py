@@ -366,10 +366,7 @@ class BambuVirtualPrinter:
         if self.selected_file is None:
             return
 
-        self.sendIO(
-            f"File opened: {self.selected_file.file_name}  "
-            f"Size: {self.selected_file.size}"
-        )
+        self.sendIO(f"File opened: {self.selected_file.dosname} Size: {self.selected_file.size}")
         self.sendIO("File selected")
 
     @gcode_executor.register("M26")
