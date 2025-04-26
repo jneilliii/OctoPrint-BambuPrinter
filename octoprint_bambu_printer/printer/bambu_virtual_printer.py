@@ -632,6 +632,7 @@ class BambuVirtualPrinter:
             self.report_print_job_status()
             self.report_print_finished()
             self.current_print_job = None
+            self.remove_project_selection()
             self.report_print_job_status()
         self.change_state(self._state_idle)
 

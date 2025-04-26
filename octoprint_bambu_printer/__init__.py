@@ -2,6 +2,7 @@
 
 __plugin_name__ = "Bambu Printer"
 __plugin_pythoncompat__ = ">=3.7,<4"
+__plugin_settings_overlay__ = {'appearance': {'components': {'disabled': {'tab': ["plugin_gcodeviewer"]}}}}
 
 from .bambu_print_plugin import BambuPrintPlugin
 
