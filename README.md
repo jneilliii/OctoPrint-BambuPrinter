@@ -10,7 +10,7 @@ This repository hosts OctoPrint-BambuPrinter, a plugin designed to bridge the ga
 
 ## What This Plugin Does
 
-OctoPrint-BambuPrinter adds native-like support for Bambu Lab printers within the OctoPrint ecosystem. Bambu Lab printers, such as the X1 Carbon and P1P series, are known for their closed ecosystem and advanced multi-material capabilities via the AMS (Automatic Material System). This plugin aims to open up those devices to greater interoperability, offering OctoPrint users features such as:
+OctoPrint-BambuPrinter adds native-like support for Bambu Lab printers within the OctoPrint ecosystem. Bambu Lab printers, such as the X1 Carbon, known for their closed ecosystem and advanced multi-material capabilities via the AMS (Automatic Material System). This plugin aims to open up those devices to greater interoperability, offering OctoPrint users features such as:
 
 Real-time Status Monitoring: Track current print progress, temperatures, printer states, and more directly within the OctoPrint interface.
 
