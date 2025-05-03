@@ -39,6 +39,7 @@ from octoprint_bambu_printer.printer.file_system.bambu_timelapse_file_info impor
     FileInfo
 )
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
+import shutil
 
 
 @contextmanager
