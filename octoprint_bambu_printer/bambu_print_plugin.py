@@ -383,6 +383,7 @@ class BambuPrintPlugin(
                 {
                     "path": os.path.join(self.get_plugin_data_folder(), "thumbs"),
                     "default_filename": "no_thumb.png",
+                    "allow_client_caching": False,
                     # "as_attachment": True,
                 },
             ),
