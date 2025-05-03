@@ -30,6 +30,11 @@ $(function () {
             return self.auth_type() !== '';
         });
 
+        self.filesViewModel.bambu_thumb_src = function(data) {
+            console.log(data);
+            return 'plugin/bambu_printer/download/thumbs/' + data.display + '.png?' + data.date;
+        }
+
         self.ams_mapping_computed = function(){
             var output_list = [];
             var index = 0;
@@ -48,15 +53,15 @@ $(function () {
             return output_list;
         };
 
-        self.getAdditionalControls = function() {
-            var buttons = [
-                    { name: "Bambu", type: "section", layout: "horizontal", children: [
-                        {type: "command", name: "Light On", enabled: "true", command: "M355 S1"},
-                        {type: "command", name: "Light Off", enabled: "true", command: "M355 S0"}
-                    ]}
-                ];
-            return buttons;
-        };
+        // self.getAdditionalControls = function() {
+        //     var buttons = [
+        //             { name: "Bambu", type: "section", layout: "horizontal", children: [
+        //                 {type: "command", name: "Light On", enabled: "true", command: "M355 S1"},
+        //                 {type: "command", name: "Light Off", enabled: "true", command: "M355 S0"}
+        //             ]}
+        //         ];
+        //     return buttons;
+        // };
 
         self.getAuthToken = function (data) {
             self.settingsViewModel.settings.plugins.bambu_printer.auth_token("");
@@ -190,6 +195,21 @@ $(function () {
             self.settingsViewModel.saveData(undefined, self.start_print_command);
             // self.settingsViewModel.saveData();
         };
+
+        $(document).ready(function(){
+			let inline_thumbnail_template = '<div class="bambu_inline_thumbnail pull-left" ' +
+			                                'data-bind="if: $data.origin == \'sdcard\'">' +
+			                                '<img class="bambu_thumb" data-bind="attr: {src: $root.bambu_thumb_src($data)}, ' +
+			                                'visible: $data.origin == \'sdcard\', "' +
+			                                'style="display: none;"/></div>';
+
+			$("#files_template_machinecode").text(function () {
+				return inline_thumbnail_template + $(this).text();;
+			});
+            $('div.gcode_files > div.scroll-wrapper > div.entry').css({"float": "left", "width": "100%"});
+            $('div.gcode_files > div.scroll-wrapper > div.entry > div.bambu_inline_thumbnail').css({"width": "100px", "height": "100px"});
+
+		});
     }
 
     OCTOPRINT_VIEWMODELS.push({

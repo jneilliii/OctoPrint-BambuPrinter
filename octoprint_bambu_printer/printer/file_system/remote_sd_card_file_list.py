@@ -53,7 +53,7 @@ class RemoteSDCardFileList:
         file_size = ftp.get_file_size(file_path.as_posix())
         date = ftp.get_file_date(file_path.as_posix())
         file_name = file_path.name.lower()
-        dosname = get_dos_filename(file_name, existing_filenames=existing_files).lower()
+        dosname = get_dos_filename(file_name, existing_filenames=existing_files, **{'max_power': 3}).lower()
         return FileInfo(
             dosname,
             file_path,

@@ -21,4 +21,15 @@
     overflow: inherit !important;
 }
 
+div.bambu_inline_thumbnail {
+  width: 100px !important;
+  height: 100px !important;
+  display: inline-block !important;
+}
+
+div.entry.machinecode {
+  float: left !important;
+  width: 100% !important;
+}
+
 

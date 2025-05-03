@@ -23,6 +23,7 @@ from octoprint.server.util.tornado import (
     LargeResponseHandler,
     path_validation_factory,
 )
+from.LargeResponseHandlerWithFallback import LargeResponseHandlerWithFallback
 from octoprint.access.permissions import Permissions
 from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
 
@@ -33,11 +34,11 @@ from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import
     RemoteSDCardFileList,
 )
 
-from .printer.file_system.bambu_timelapse_file_info import (
+from octoprint_bambu_printer.printer.file_system.bambu_timelapse_file_info import (
     BambuTimelapseFileInfo,
     FileInfo
 )
-from .printer.bambu_virtual_printer import BambuVirtualPrinter
+from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
 
 
 @contextmanager
@@ -58,6 +59,7 @@ class BambuPrintPlugin(
     octoprint.plugin.EventHandlerPlugin,
     octoprint.plugin.SimpleApiPlugin,
     octoprint.plugin.BlueprintPlugin,
+    octoprint.plugin.StartupPlugin,
 ):
     _logger: logging.Logger
     _plugin_manager: octoprint.plugin.PluginManager
@@ -83,6 +85,11 @@ class BambuPrintPlugin(
         return {"js": ["js/jquery-ui.min.js", "js/knockout-sortable.1.2.0.js", "js/bambu_printer.js"],
                 "css": ["css/bambu_printer.css"]
                 }
+
+    def on_after_startup(self):
+        if not os.path.exists(os.path.join(self.get_plugin_data_folder(), "thumbs", "no_thumb.png")):
+            self._logger.info("Creating no_thumb.png")
+            shutil.copy(os.path.join(self._basefolder, "static", "img", "no_thumb.png"), os.path.join(self.get_plugin_data_folder(), "thumbs"))
 
     def get_template_configs(self):
         return [
@@ -182,12 +189,42 @@ class BambuPrintPlugin(
             if payload["operation"] == "add" and "3mf" in payload["type"]:
                 file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
                 if os.path.exists(file_container):
-                    with zipfile.ZipFile(file_container) as z:
-                        with z.open("Metadata/plate_1.json", "r") as json_data:
-                            plate_data = json.load(json_data)
+                    png_folder_path = os.path.join(self.get_plugin_data_folder(), "thumbs")
+                    if not os.path.exists(png_folder_path):
+                        os.makedirs(png_folder_path)
+                    png_file_name = os.path.join(png_folder_path, payload["name"] + ".png")
+                    with zipfile.ZipFile(file_container) as zipObj:
+                        try:
+                            # extract thumbnail
+                            zipInfo = zipObj.getinfo("Metadata/plate_1.png")
+                            zipInfo.filename = os.path.basename(png_file_name)
+                            zipObj.extract(zipInfo, png_folder_path)
+                            if os.path.exists(png_file_name):
+                                thumb_url = f"/plugin/bambu_printer/download/thumbs/{payload['name']}.png"
+                                self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail_src",
+                                                                           self._identifier, overwrite=True)
+                                self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail",
+                                                                           thumb_url, overwrite=True)
 
-                    if plate_data:
-                        self._file_manager.set_additional_metadata("sdcard", payload["path"], "plate_data", plate_data, overwrite=True)
+                            # extract plate data
+                            with zipObj.open("Metadata/plate_1.json", "r") as json_data:
+                                plate_data = json.load(json_data)
+                                if plate_data:
+                                    # TODO: once sdcard has a true storage interface change from local
+                                    self._file_manager.set_additional_metadata("local", payload["path"], "plate_data",
+                                                                               plate_data, overwrite=True)
+                        except KeyError:
+                            self._logger.info(f"unable to extract from 3mf file: {file_container}")
+        elif event == Events.UPLOAD:
+            if payload["target"] == "local" and payload["print"] in valid_boolean_trues:
+                path = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
+                filename = payload["name"]
+                with self._bambu_file_system.get_ftps_client() as ftp:
+                    if ftp.upload_file(path, filename):
+                        self._project_files_view.with_filter("", ".3mf")
+                        file_info = self._project_files_view.get_file_by_name(filename)
+                        if payload["print"] in valid_boolean_trues:
+                            self._printer.select_file(file_info.dosname, True, printAfterSelect=payload["print"] in valid_boolean_trues)
 
     def support_3mf_files(self):
         return {"machinecode": {"3mf": ["3mf"]}}
@@ -265,7 +302,6 @@ class BambuPrintPlugin(
 
     def get_timelapse_file_list(self):
         if flask.request.path.startswith("/api/timelapse"):
-
             def process():
                 return_file_list = []
                 for file_info in self._timelapse_files_view.get_all_info():
@@ -278,22 +314,6 @@ class BambuPrintPlugin(
             thread = threading.Thread(target=process)
             thread.daemon = True
             thread.start()
-
-    def after_request(self, response, *args, **kwargs):
-        if flask.request.path.startswith("/api/files/local") and flask.request.method == "POST" and response.status_code == 201:
-            path = os.path.join(self._settings.getBaseFolder("uploads"), flask.request.values.get("path"), flask.request.values.get("file.name"))
-            filename = flask.request.values.get("file.name")
-            with self._bambu_file_system.get_ftps_client() as ftp:
-                if ftp.upload_file(path, filename):
-                    self._project_files_view.with_filter("", ".3mf")
-                    file_info = self._project_files_view.get_file_by_name(filename)
-                    if flask.request.values.get("print", False) in valid_boolean_trues:
-                        self._printer.select_file(file_info.dosname, True, printAfterSelect=flask.request.values.get("print", False) in valid_boolean_trues)
-
-        return response
-
-    def _hook_octoprint_server_api_after_request(self, *args, **kwargs):
-        return [self.after_request]
 
     def _hook_octoprint_server_api_before_request(self, *args, **kwargs):
         return [self.get_timelapse_file_list]
@@ -355,6 +375,15 @@ class BambuPrintPlugin(
                     "path_validation": path_validation_factory(
                         lambda path: not is_hidden_path(path), status_code=404
                     ),
+                },
+            ),
+            (
+                r"/download/thumbs/(.*)",
+                LargeResponseHandlerWithFallback,
+                {
+                    "path": os.path.join(self.get_plugin_data_folder(), "thumbs"),
+                    "default_filename": "no_thumb.png",
+                    # "as_attachment": True,
                 },
             ),
         ]
