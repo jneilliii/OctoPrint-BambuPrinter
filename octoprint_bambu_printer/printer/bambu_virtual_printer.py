@@ -328,7 +328,14 @@ class BambuVirtualPrinter:
     ##~~ project file functions
 
     def remove_project_selection(self):
+        self._log.debug("Removing project selection.")
         self._selected_project_file = None
+        # ** Add call to send message after deselection **
+        # This will make _send_file_selected_message send the "deselected" message
+        self._send_file_selected_message()
+        # Ensure _serial_io.reset() is *not* called here based on previous issues (and it's not in your current script)
+
+
 
     def select_project_file(self, file_path: str) -> bool:
         file_info = self._project_files_view.get_file_by_name(file_path)
@@ -352,6 +359,23 @@ class BambuVirtualPrinter:
 
     ##~~ command implementations
 
+    ##~~ custom command for debugging
+
+    @gcode_executor.register_no_data("M999")
+    def _debug_remove_selection(self) -> bool:
+        """
+        Custom command to trigger remove_project_selection for debugging.
+        """
+        self._log.debug("M999 command received. Calling remove_project_selection.")
+        self.remove_project_selection()
+        # Send an "ok" response to acknowledge the command
+        next_expected_line = self._serial_io.lastN + 1
+        self.sendIO(f"ok {next_expected_line}\n")
+        return True # Indicate the command was handled
+
+    ##~~ end custom command
+
+
     @gcode_executor.register_no_data("M21")
     def _sd_status(self) -> bool:
         self.sendIO("SD card ok")
@@ -359,15 +383,45 @@ class BambuVirtualPrinter:
 
     @gcode_executor.register("M23")
     def _select_sd_file(self, data: str) -> bool:
+        self._log.debug("M23 command received.")
         filename = data.split(maxsplit=1)[1].strip()
-        return self.select_project_file(filename)
+
+        # ** Step 1: Perform the deselection logic **
+        self._log.debug("Calling remove_project_selection as part of M23 handling.")
+        # Call the remove_project_selection method to clear any previous selection state
+        self.remove_project_selection()
+        # remove_project_selection will call _send_file_selected_message
+        # and send the explicit deselection messages over serial.
+
+        # Add a small delay here to allow OctoPrint's UI to potentially process
+        # the deselection messages before the selection messages arrive.
+        # This might help synchronize the UI state.
+        time.sleep(1) # Small delay (50 milliseconds)
+
+        # ** Step 2: Proceed with the original M23 selection logic **
+        self._log.debug(f"Proceeding with selection for filename: {filename}")
+        # Call the select_project_file method to set the new selection
+        # select_project_file will call _send_file_selected_message
+        # and send the selection messages for the new file.
+        success = self.select_project_file(filename)
+
+        # The "ok N+1" response for the M23 command is handled automatically
+        # by _process_gcode_serial_command after this method returns.
+
+        return success # Return whether the selection was successful
+
 
     def _send_file_selected_message(self):
         if self.selected_file is None:
             return
 
-        self.sendIO(f"File opened: {self.selected_file.dosname} Size: {self.selected_file.size}")
+        self.sendIO(
+            f"File opened: {self.selected_file.file_name}  "
+            f"Size: {self.selected_file.size}"
+        )
         self.sendIO("File selected")
+
+
 
     @gcode_executor.register("M26")
     def _set_sd_position(self, data: str) -> bool:
@@ -449,6 +503,49 @@ class BambuVirtualPrinter:
         if self._print_temp_reporter is not None:
             self._print_temp_reporter.cancel()
             self._print_temp_reporter = None
+
+    def select_file(self, path, printAfterSelect=False, **kwargs):
+        """
+        Handles file selection requests from OctoPrint's core.
+        """
+        self._log.debug(f"OctoPrint requested file selection: path={path}, printAfterSelect={printAfterSelect}")
+
+        # Case 1: OctoPrint wants to deselect the current file (path is None)
+        if path is None:
+            self._log.debug("Selection path is None, removing project selection.")
+            # Call remove_project_selection directly here as it's a clear deselect intent from UI
+            # remove_project_selection calls _send_file_selected_message
+            self.remove_project_selection()
+            return True # Indicate handled
+
+        # Try to find the file info using the input path directly (might be an SD path)
+        selected_file_info = self._project_files_view.get_file_by_name(str(path))
+
+        if selected_file_info is not None:
+            # Case 2: Path is a recognized SD card file path.
+            self._log.debug(f"Selecting recognized SD card file: {path}")
+            # We rely on the M23 command (sent by OctoPrint concurrently with this select_file call)
+            # to trigger the actual selection via _select_sd_file -> select_project_file.
+            # Just return True here to indicate the select_file call was handled for an SD file.
+            # The M23 processing (in the serial thread) will manage the state and messaging.
+            # Ensure _select_sd_file calls select_project_file.
+            return True
+
+        else:
+            # Case 3: Path is NOT a recognized SD card path (likely a local path or invalid).
+            self._log.debug(f"Path '{path}' is not a direct SD path. Assuming local or invalid.")
+
+            # ** Instead of directly calling remove_project_selection, simulate receiving M999 **
+            # This forces the deselection logic through the serial command processing path,
+            # which seems to handle state changes more reliably in this scenario.
+            self._log.debug("Simulating M999 command to trigger deselection via serial handler.")
+            # Add M999 followed by a newline to the incoming serial queue
+            self._serial_io.add_incoming_line(b'M999\n')
+
+            # We return True here to indicate that the select_file call was handled
+            # by initiating the deselection process via the simulated command.
+            # The actual state change and messaging will happen when M999 is processed by the serial thread.
+            return True # Indicate handled
 
     # noinspection PyUnusedLocal
     @gcode_executor.register_no_data("M115")
@@ -547,18 +644,41 @@ class BambuVirtualPrinter:
 
     def _process_gcode_serial_command(self, gcode: str, full_command: str):
         self._log.debug(f"processing gcode {gcode} command = {full_command}")
+
+        # Execute the command handler
         handled = self.gcode_executor.execute(self, gcode, full_command)
+
+        # ** Modify the response sending logic **
+        # Regardless of whether it was handled by a local executor or sent via MQTT,
+        # we need to send an "ok" response back to OctoPrint via the simulated serial.
+        # This response should include the next expected line number.
+
+        # Get the next expected line number from PrinterSerialIO's state
+        # Make sure to access lastN via self._serial_io
+        next_expected_line = self._serial_io.lastN + 1
+
         if handled:
-            self.sendOk()
+            self._log.debug(f"G-code command {gcode} handled internally. Sending ok {next_expected_line}")
+            # Send "ok N+1" back to OctoPrint via PrinterSerialIO
+            self._serial_io.send(f"ok {next_expected_line}\n")
             return
 
-        # post gcode to printer otherwise
+        # If not handled by a local executor, post gcode to printer otherwise
         if self.bambu_client.connected:
             GCODE_COMMAND = commands.SEND_GCODE_TEMPLATE
             GCODE_COMMAND["print"]["param"] = full_command + "\n"
             if self.bambu_client.publish(GCODE_COMMAND):
-                self._log.info("command sent successfully")
-                self.sendOk()
+                self._log.info(f"command {gcode} sent successfully via MQTT. Sending ok {next_expected_line}")
+                # Send "ok N+1" back to OctoPrint via PrinterSerialIO
+                self._serial_io.send(f"ok {next_expected_line}\n")
+            else:
+                self._log.warning(f"Failed to send command {gcode} via MQTT.")
+                # Optionally send an error response back to OctoPrint
+                # self._serial_io.send(f"Error: MQTT send failed for {gcode}\n")
+        else:
+             self._log.warning(f"Printer not connected, cannot send command {gcode} via MQTT.")
+             # Optionally send an error response back to OctoPrint
+             # self._serial_io.send(f"Error: Printer not connected, cannot execute {gcode}\n")
 
     @gcode_executor.register_no_data("M112")
     def _shutdown(self):
@@ -607,6 +727,8 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M524")
     def _cancel_print(self):
         self._current_state.cancel_print()
+        time.sleep(5)
+        self.remove_project_selection()
         return True
 
     def report_print_job_status(self):
@@ -703,6 +825,12 @@ class BambuVirtualPrinter:
 
         self._current_state.finalize()
         self._current_state = new_state
+
+        # Check if the new state is the IdleState (self._state_idle is the instance of IdleState)
+        if new_state == self._state_idle:
+            self._log.debug("Transitioned to Idle state. Applying cleanup delay and removing selection.")
+
+
         self._current_state.init()
 
     def _showPrompt(self, text, choices):
