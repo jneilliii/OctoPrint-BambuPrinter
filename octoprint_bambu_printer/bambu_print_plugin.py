@@ -231,16 +231,16 @@ class BambuPrintPlugin(
         return {"machinecode": {"3mf": ["3mf"]}}
 
     def upload_to_sd(
-        self,
-        printer,
-        filename,
-        path,
-        sd_upload_started,
-        sd_upload_succeeded,
-        sd_upload_failed,
-        *args,
-        **kwargs,
-    ):
+            self,
+            printer,
+            filename,
+            path,
+            sd_upload_started,
+            sd_upload_succeeded,
+            sd_upload_failed,
+            *args,
+            **kwargs,
+        ):
         self._logger.debug(f"Starting upload from {filename} to {filename}")
         sd_upload_started(filename, filename)
 
@@ -248,18 +248,54 @@ class BambuPrintPlugin(
             with measure_elapsed() as get_elapsed:
                 try:
                     with self._bambu_file_system.get_ftps_client() as ftp:
-                        if ftp.upload_file(path, f"{filename}"):
+                        existing_files = ftp.list_files()
+
+                        # Get base name and extension
+                        base_name, ext = os.path.splitext(filename)
+                        prefix = base_name[:6].lower()
+
+                        # Look for similar files that might conflict
+                        existing_filenames = [os.path.basename(f["name"]).lower() for f in existing_files]
+                        similar_files = [f for f in existing_filenames if f.startswith(prefix) and f.endswith(ext.lower())]
+
+                        # If exact name exists, delete it (safe overwrite)
+                        file_to_delete = next((Path(f["name"]) for f in existing_files if os.path.basename(f["name"]) == filename), None)
+                        if file_to_delete:
+                            self._logger.info(f"File '{filename}' already exists on SD card. Deleting '{file_to_delete}' before upload.")
+                            self._bambu_file_system.delete_file(file_to_delete)
+
+                        # Handle short name collision (e.g., cube_p~1.3mf)
+                        if filename.lower() in existing_filenames:
+                            new_index = 1
+                            while True:
+                                new_filename = f"{prefix}_{new_index}{ext}"
+                                if new_filename not in existing_filenames:
+                                    filename = new_filename
+                                    break
+                                new_index += 1
+                            self._logger.info(f"Filename collision detected. Uploading as '{filename}' instead.")
+
+                        # Upload file
+                        if ftp.upload_file(path, filename):
                             sd_upload_succeeded(filename, filename, get_elapsed())
+                            # Refresh file list
+                            self.refresh_file_list()  # Trigger file list refresh after upload
                         else:
                             raise Exception("upload failed")
                 except Exception as e:
                     sd_upload_failed(filename, filename, get_elapsed())
-                    self._logger.exception(e)
+                    self._logger.exception("Upload failed with exception", exc_info=e)
 
         thread = threading.Thread(target=process)
         thread.daemon = True
         thread.start()
         return filename
+
+    def refresh_file_list(self):
+        """Method to trigger a refresh of the file list."""
+        self._logger.debug("Refreshing file list.")
+        # Assuming you have access to OctoPrint API to trigger refresh, you can use:
+        self._printer.commands("M20")  # This command triggers a refresh of the SD card file list
 
     def get_template_vars(self):
         return {"plugin_version": self._plugin_version}
