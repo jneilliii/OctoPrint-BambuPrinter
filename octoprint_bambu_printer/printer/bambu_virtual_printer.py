@@ -357,7 +357,6 @@ class BambuVirtualPrinter:
         self._send_file_selected_message()
         return True
 
-    ##~~ command implementations
 
     @gcode_executor.register_no_data("M21")
     def _sd_status(self) -> bool:
@@ -379,7 +378,7 @@ class BambuVirtualPrinter:
         # Add a small delay here to allow OctoPrint's UI to potentially process
         # the deselection messages before the selection messages arrive.
         # This might help synchronize the UI state.
-        time.sleep(0.05) # Small delay (50 milliseconds)
+        time.sleep(1) # Small delay (50 milliseconds)
 
         # ** Step 2: Proceed with the original M23 selection logic **
         self._log.debug(f"Proceeding with selection for filename: {filename}")
@@ -398,10 +397,7 @@ class BambuVirtualPrinter:
         if self.selected_file is None:
             return
 
-        self.sendIO(
-            f"File opened: {self.selected_file.file_name}  "
-            f"Size: {self.selected_file.size}"
-        )
+        self.sendIO(f"File opened: {self.selected_file.dosname} Size: {self.selected_file.size}")
         self.sendIO("File selected")
 
 
@@ -486,6 +482,8 @@ class BambuVirtualPrinter:
         if self._print_temp_reporter is not None:
             self._print_temp_reporter.cancel()
             self._print_temp_reporter = None
+
+
 
     # noinspection PyUnusedLocal
     @gcode_executor.register_no_data("M115")
@@ -579,7 +577,7 @@ class BambuVirtualPrinter:
 
             gcode_command["print"]["param"] = speed_command
             if self.bambu_client.publish(gcode_command):
-                self._log.info(f"{percent}% speed adjustment command sent successfully")
+                self._log.debug(f"{percent}% speed adjustment command sent successfully")
         return True
 
     def _process_gcode_serial_command(self, gcode: str, full_command: str):
@@ -608,7 +606,7 @@ class BambuVirtualPrinter:
             GCODE_COMMAND = commands.SEND_GCODE_TEMPLATE
             GCODE_COMMAND["print"]["param"] = full_command + "\n"
             if self.bambu_client.publish(GCODE_COMMAND):
-                self._log.info(f"command {gcode} sent successfully via MQTT. Sending ok {next_expected_line}")
+                self._log.debug(f"command {gcode} sent successfully via MQTT. Sending ok {next_expected_line}")
                 # Send "ok N+1" back to OctoPrint via PrinterSerialIO
                 self._serial_io.send(f"ok {next_expected_line}\n")
             else:
@@ -667,7 +665,7 @@ class BambuVirtualPrinter:
     @gcode_executor.register("M524")
     def _cancel_print(self):
         self._current_state.cancel_print()
-        time.sleep(0.05)
+        time.sleep(5)
         self.remove_project_selection()
         return True
 
@@ -697,6 +695,8 @@ class BambuVirtualPrinter:
             self.remove_project_selection()
             self.report_print_job_status()
         self.change_state(self._state_idle)
+        time.sleep(5)
+        self.remove_project_selection()
 
     def _create_temperature_message(self) -> str:
         template = "{heater}:{actual:.2f}/ {target:.2f}"
