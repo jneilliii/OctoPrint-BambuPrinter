@@ -5,10 +5,9 @@ This plugin is an attempt to connect BambuLab printers to OctoPrint. It's still 
 ## System Requirements
 
 * Python 3.9 or higher (OctoPi 1.0.0)
+
 ## Setup
-## install the plugin using the " from URL " section in plugin manger
+
 Install manually using this URL:
 
-    https://github.com/CodeMasterCody3D/OctoPrint-BambuPrinter/archive/refs/heads/rc.zip
-
-
+    https://github.com/jneilliii/OctoPrint-BambuPrinter/archive/master.zip
