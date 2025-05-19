@@ -250,13 +250,46 @@ class BambuPrintPlugin(
             self._logger.error(f"An unexpected error occurred during slice_info.config parsing: {e}")
             return None
 
+
+    def generate_and_store_ams_mapping(self, sliced_metadata: dict):
+        ams_data = self._settings.get(["ams_data"])
+        mapping = []
+
+        filaments = sliced_metadata.get("plate", {}).get("filaments", [])
+        if not filaments or not isinstance(ams_data, list):
+            self._logger.info("No filaments or AMS data found. Using empty mapping.")
+            mapping = [-1] * len(filaments)
+        else:
+            for filament in filaments:
+                match = -1
+                ttype = filament.get("type", "").lower()
+                tidx = filament.get("tray_info_idx", "")
+
+                for unit_index, unit in enumerate(ams_data):
+                    trays = unit.get("tray", [])
+                    for slot_index, tray in enumerate(trays):
+                        if (not tray.get("empty", True) and
+                            tray.get("type", "").lower() == ttype and
+                            tray.get("idx") == tidx):
+                            match = unit_index * 4 + slot_index
+                            break
+                    if match != -1:
+                        break
+                mapping.append(match)
+
+        self._settings.set(["ams_mapping"], mapping)
+        self._settings.save()
+        self._logger.info(f"Generated and saved AMS mapping: {mapping}")
+        return mapping
+
     def on_event(self, event, payload):
         if event == Events.TRANSFER_DONE:
             self._printer.commands("M20 L T", force=True)
+
         elif event == Events.FILE_ADDED:
-            # ... (your existing FILE_ADDED logic remains the same)
-            if payload["operation"] == "add" and "3mf" in payload["type"]:
+            if payload.get("operation") == "add" and "3mf" in payload.get("type", ""):
                 file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
+
                 if os.path.exists(file_container):
                     png_folder_path = os.path.join(self.get_plugin_data_folder(), "thumbs")
                     if not os.path.exists(png_folder_path):
@@ -264,11 +297,9 @@ class BambuPrintPlugin(
                     png_file_name = os.path.join(png_folder_path, payload["name"] + ".png")
 
                     try:
-                         with zipfile.ZipFile(file_container) as zipObj:
-                             # ... (your existing 3mf extraction logic remains the same)
-                             # --- Existing PNG and Plate JSON Extraction ---
+                        with zipfile.ZipFile(file_container) as zipObj:
+                            # Extract plate_1.png and plate_1.json
                             try:
-                                # extract thumbnail
                                 zipInfo = zipObj.getinfo("Metadata/plate_1.png")
                                 zipInfo.filename = os.path.basename(png_file_name)
                                 zipObj.extract(zipInfo, png_folder_path)
@@ -279,95 +310,173 @@ class BambuPrintPlugin(
                                     self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail",
                                                                                thumb_url, overwrite=True)
 
-                                # extract plate data
                                 with zipObj.open("Metadata/plate_1.json", "r") as json_data:
                                     plate_data = json.load(json_data)
                                     if plate_data:
-                                        # TODO: once sdcard has a true storage interface change from local
                                         self._file_manager.set_additional_metadata("local", payload["path"], "plate_data",
                                                                                    plate_data, overwrite=True)
                             except KeyError:
-                                # Original file not found error log
-                                self._logger.info(f"unable to extract from 3mf file: {file_container}")
+                                self._logger.info(f"Unable to extract from 3mf file: {file_container}")
                             except Exception as e:
-                                # Catch other errors during the original extraction
-                                self._logger.error(f"An error occurred during existing 3mf extraction (png/json) for {file_container}: {e}")
+                                self._logger.error(f"An error occurred during 3mf extraction for {file_container}: {e}")
 
-
-                            # --- New Slice Info Config Extraction, Parsing, and Saving ---
+                            # Extract and parse slice_info.config
                             try:
-                                # Access slice_info.config from the zip
                                 with zipObj.open("Metadata/slice_info.config", "r") as config_file:
-                                    # Read and decode the content (XML is text)
                                     config_content = config_file.read().decode('utf-8')
-
-                                    # Parse the XML content using the helper function
                                     parsed_config = self._parse_slice_info_config(config_content)
 
-                                    if parsed_config: # Only save if parsing was successful
-                                        # Construct the output file path in the uploads folder
-                                        # Using a leading dot for a hidden file, as per your example
+                                    if parsed_config:
+                                        self.generate_and_store_ams_mapping(parsed_config)
+
                                         upload_folder = self._settings.getBaseFolder("uploads")
                                         output_json_path = os.path.join(upload_folder, "." + payload["name"] + ".json")
 
-                                        # Save the parsed data to a JSON file
                                         with open(output_json_path, "w") as f:
-                                            json.dump(parsed_config, f, indent=4) # Use indent for readability
+                                            json.dump(parsed_config, f, indent=4)
 
-                                        self._logger.info(f"Successfully extracted, parsed, and saved slice_info.config for {payload['name']} to {output_json_path}")
+                                        self._logger.info(
+                                            f"Successfully extracted, parsed, and saved slice_info.config for {payload['name']} to {output_json_path}"
+                                        )
                                     else:
-                                         # _parse_slice_info_config logs specific errors if parsing failed
-                                         self._logger.warning(f"Parsing of slice_info.config failed for {payload['name']}")
+                                        self._logger.warning(
+                                            f"Parsing of slice_info.config failed for {payload['name']}"
+                                        )
 
                             except KeyError:
-                                # Log if slice_info.config is not found
                                 self._logger.info(f"Metadata/slice_info.config not found in {file_container}")
                             except Exception as e:
-                                # Catch any other exceptions during config processing (parsing, writing)
-                                self._logger.error(f"An error occurred during slice_info.config processing for {file_container}: {e}")
+                                self._logger.error(
+                                    f"An error occurred during slice_info.config processing for {file_container}: {e}"
+                                )
 
                     except zipfile.BadZipFile:
-                         self._logger.error(f"File is not a valid zip file: {file_container}")
+                        self._logger.error(f"File is not a valid zip file: {file_container}")
                     except Exception as e:
-                         self._logger.error(f"An unexpected error occurred while processing 3mf file {file_container}: {e}")
-
+                        self._logger.error(f"An unexpected error occurred while processing 3mf file {file_container}: {e}")
 
         elif event == Events.UPLOAD:
-            # Check if the target is local or sdcard
             if payload["target"] in ["local", "sdcard"]:
-                # Construct the full path to the file in OctoPrint's uploads folder
                 path = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
-
                 filename = payload["name"]
 
-                # Check if the file actually exists at the expected path before trying to upload
                 if os.path.exists(path):
-                    # Optional: Add a check here if you ONLY want to upload .3mf files via FTP
                     if filename.lower().endswith(".3mf"):
                         with self._bambu_file_system.get_ftps_client() as ftp:
                             if ftp.upload_file(path, filename):
                                 self._logger.info(f"Successfully FTP uploaded {filename} from {path}")
 
-                                # *** Add this block to refresh the SD card list after an SD card upload ***
                                 if payload["target"] == "sdcard":
-                                     self._logger.info("Triggering SD card file list refresh (M20)")
-                                     self._printer.commands("M20")
-                                # ***********************************************************************
+                                    self._logger.info("Triggering SD card file list refresh (M20)")
+                                    self._printer.commands("M20")
 
-                                # Reintroduce the logic to select and potentially print if the 'print' flag is true
                                 if payload.get("print") in valid_boolean_trues:
-                                    # Assuming the file is uploaded to the root of the printer's SD card with the same name
-                                    printer_file_path = filename # Adjust if files are uploaded to subfolders on the printer SD
-
+                                    printer_file_path = filename
                                     self._logger.info(f"Attempting to select and print file on printer: {printer_file_path}")
-                                    # The select_file command needs the path on the printer's filesystem
-                                    # The second argument `True` means it's an SD file
-                                    self._printer.select_file(printer_file_path, True, printAfterSelect=True) # printAfterSelect should be True here
-
+                                    self._printer.select_file(printer_file_path, True, printAfterSelect=True)
                     else:
                         self._logger.info(f"Skipping FTP upload for non-.3mf file: {filename} uploaded to {payload['target']}")
                 else:
-                     self._logger.error(f"Uploaded file not found at expected path: {path}")
+                    self._logger.error(f"Uploaded file not found at expected path: {path}")
+            else:
+                self._logger.info(f"Upload target is not local or sdcard: {payload.get('target')}. Skipping FTP upload.")
+
+    def on_event(self, event, payload):
+        if event == Events.TRANSFER_DONE:
+            self._printer.commands("M20 L T", force=True)
+
+        elif event == Events.FILE_ADDED:
+            if payload.get("operation") == "add" and "3mf" in payload.get("type", ""):
+                file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
+
+                if os.path.exists(file_container):
+                    png_folder_path = os.path.join(self.get_plugin_data_folder(), "thumbs")
+                    if not os.path.exists(png_folder_path):
+                        os.makedirs(png_folder_path)
+                    png_file_name = os.path.join(png_folder_path, payload["name"] + ".png")
+
+                    try:
+                        with zipfile.ZipFile(file_container) as zipObj:
+                            # Extract plate_1.png and plate_1.json
+                            try:
+                                zipInfo = zipObj.getinfo("Metadata/plate_1.png")
+                                zipInfo.filename = os.path.basename(png_file_name)
+                                zipObj.extract(zipInfo, png_folder_path)
+                                if os.path.exists(png_file_name):
+                                    thumb_url = f"/plugin/bambu_printer/download/thumbs/{payload['name']}.png"
+                                    self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail_src",
+                                                                               self._identifier, overwrite=True)
+                                    self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail",
+                                                                               thumb_url, overwrite=True)
+
+                                with zipObj.open("Metadata/plate_1.json", "r") as json_data:
+                                    plate_data = json.load(json_data)
+                                    if plate_data:
+                                        self._file_manager.set_additional_metadata("local", payload["path"], "plate_data",
+                                                                                   plate_data, overwrite=True)
+                            except KeyError:
+                                self._logger.info(f"Unable to extract from 3mf file: {file_container}")
+                            except Exception as e:
+                                self._logger.error(f"An error occurred during 3mf extraction for {file_container}: {e}")
+
+                            # Extract and parse slice_info.config
+                            try:
+                                with zipObj.open("Metadata/slice_info.config", "r") as config_file:
+                                    config_content = config_file.read().decode('utf-8')
+                                    parsed_config = self._parse_slice_info_config(config_content)
+
+                                    if parsed_config:
+                                        self.generate_and_store_ams_mapping(parsed_config)
+
+                                        upload_folder = self._settings.getBaseFolder("uploads")
+                                        output_json_path = os.path.join(upload_folder, "." + payload["name"] + ".json")
+
+                                        with open(output_json_path, "w") as f:
+                                            json.dump(parsed_config, f, indent=4)
+
+                                        self._logger.info(
+                                            f"Successfully extracted, parsed, and saved slice_info.config for {payload['name']} to {output_json_path}"
+                                        )
+                                    else:
+                                        self._logger.warning(
+                                            f"Parsing of slice_info.config failed for {payload['name']}"
+                                        )
+
+                            except KeyError:
+                                self._logger.info(f"Metadata/slice_info.config not found in {file_container}")
+                            except Exception as e:
+                                self._logger.error(
+                                    f"An error occurred during slice_info.config processing for {file_container}: {e}"
+                                )
+
+                    except zipfile.BadZipFile:
+                        self._logger.error(f"File is not a valid zip file: {file_container}")
+                    except Exception as e:
+                        self._logger.error(f"An unexpected error occurred while processing 3mf file {file_container}: {e}")
+
+        elif event == Events.UPLOAD:
+            if payload["target"] in ["local", "sdcard"]:
+                path = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
+                filename = payload["name"]
+
+                if os.path.exists(path):
+                    if filename.lower().endswith(".3mf"):
+                        with self._bambu_file_system.get_ftps_client() as ftp:
+                            if ftp.upload_file(path, filename):
+                                self._logger.info(f"Successfully FTP uploaded {filename} from {path}")
+
+                                if payload["target"] == "sdcard":
+                                    self._logger.info("Triggering SD card file list refresh (M20)")
+                                    self._printer.commands("M20")
+
+                                if payload.get("print") in valid_boolean_trues:
+                                    printer_file_path = filename
+                                    self._logger.info(f"Attempting to select and print file on printer: {printer_file_path}")
+                                    self._printer.select_file(printer_file_path, True, printAfterSelect=True)
+                    else:
+                        self._logger.info(f"Skipping FTP upload for non-.3mf file: {filename} uploaded to {payload['target']}")
+                else:
+                    self._logger.error(f"Uploaded file not found at expected path: {path}")
             else:
                 self._logger.info(f"Upload target is not local or sdcard: {payload.get('target')}. Skipping FTP upload.")
 
