@@ -30,9 +30,13 @@ from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
 from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
 from octoprint_bambu_printer.printer.pybambu import BambuCloud
 
+import xml.etree.ElementTree as ET
+
 from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import (
     RemoteSDCardFileList,
 )
+
+from typing import Dict, Any
 
 from octoprint_bambu_printer.printer.file_system.bambu_timelapse_file_info import (
     BambuTimelapseFileInfo,
@@ -183,49 +187,297 @@ class BambuPrintPlugin(
                         }
                     )
 
+    def _parse_slice_info_config(self, xml_content):
+        """
+        Parses the XML content of slice_info.config into a dictionary.
+        Maps attributes to dictionary keys, handles lists for repeated elements.
+        """
+        parsed_data = {}
+        try:
+            root = ET.fromstring(xml_content)
+
+            # Parse Header section
+            header_elem = root.find('header')
+            if header_elem is not None:
+                parsed_data['header'] = {}
+                for item in header_elem.findall('header_item'):
+                    key = item.get('key')
+                    value = item.get('value')
+                    if key is not None: # Ensure key exists
+                        parsed_data['header'][key] = value
+
+            # Parse Plate section
+            plate_elem = root.find('plate')
+            if plate_elem is not None:
+                parsed_data['plate'] = {}
+
+                # Collect metadata items
+                metadata_items = plate_elem.findall('metadata')
+                if metadata_items:
+                    parsed_data['plate']['metadata'] = {}
+                    for item in metadata_items:
+                        key = item.get('key')
+                        value = item.get('value')
+                        if key is not None:
+                            parsed_data['plate']['metadata'][key] = value
+
+                # Collect object items (assuming multiple objects are possible)
+                object_items = plate_elem.findall('object')
+                if object_items:
+                    parsed_data['plate']['objects'] = []
+                    for item in object_items:
+                        # Store all attributes for the object element
+                        parsed_data['plate']['objects'].append(item.attrib)
+
+                # Collect filament items (assuming multiple filaments are possible)
+                filament_items = plate_elem.findall('filament')
+                if filament_items:
+                    parsed_data['plate']['filaments'] = []
+                    for item in filament_items:
+                        # Store all attributes for the filament element
+                        parsed_data['plate']['filaments'].append(item.attrib)
+
+                # Add any other direct children of plate if necessary in the future
+                # For now, metadata, object, and filament cover the example.
+
+            return parsed_data
+
+        except ET.ParseError as e:
+            self._logger.error(f"Failed to parse slice_info.config XML: {e}")
+            return None # Indicate parsing failure
+        except Exception as e:
+            self._logger.error(f"An unexpected error occurred during slice_info.config parsing: {e}")
+            return None
+
+
+    def generate_and_store_ams_mapping(self, sliced_metadata: dict):
+        ams_data = self._settings.get(["ams_data"])
+        mapping = []
+
+        filaments = sliced_metadata.get("plate", {}).get("filaments", [])
+        if not filaments or not isinstance(ams_data, list):
+            self._logger.info("No filaments or AMS data found. Using empty mapping.")
+            mapping = [-1] * len(filaments)
+        else:
+            for filament in filaments:
+                match = -1
+                ttype = filament.get("type", "").lower()
+                tidx = filament.get("tray_info_idx", "")
+
+                for unit_index, unit in enumerate(ams_data):
+                    trays = unit.get("tray", [])
+                    for slot_index, tray in enumerate(trays):
+                        if (not tray.get("empty", True) and
+                            tray.get("type", "").lower() == ttype and
+                            tray.get("idx") == tidx):
+                            match = unit_index * 4 + slot_index
+                            break
+                    if match != -1:
+                        break
+                mapping.append(match)
+
+        self._settings.set(["ams_mapping"], mapping)
+        self._settings.save()
+        self._logger.info(f"Generated and saved AMS mapping: {mapping}")
+        return mapping
+
     def on_event(self, event, payload):
         if event == Events.TRANSFER_DONE:
             self._printer.commands("M20 L T", force=True)
+
         elif event == Events.FILE_ADDED:
-            if payload["operation"] == "add" and "3mf" in payload["type"]:
+            if payload.get("operation") == "add" and "3mf" in payload.get("type", ""):
                 file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
+
                 if os.path.exists(file_container):
                     png_folder_path = os.path.join(self.get_plugin_data_folder(), "thumbs")
                     if not os.path.exists(png_folder_path):
                         os.makedirs(png_folder_path)
                     png_file_name = os.path.join(png_folder_path, payload["name"] + ".png")
-                    with zipfile.ZipFile(file_container) as zipObj:
-                        try:
-                            # extract thumbnail
-                            zipInfo = zipObj.getinfo("Metadata/plate_1.png")
-                            zipInfo.filename = os.path.basename(png_file_name)
-                            zipObj.extract(zipInfo, png_folder_path)
-                            if os.path.exists(png_file_name):
-                                thumb_url = f"/plugin/bambu_printer/download/thumbs/{payload['name']}.png"
-                                self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail_src",
-                                                                           self._identifier, overwrite=True)
-                                self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail",
-                                                                           thumb_url, overwrite=True)
 
-                            # extract plate data
-                            with zipObj.open("Metadata/plate_1.json", "r") as json_data:
-                                plate_data = json.load(json_data)
-                                if plate_data:
-                                    # TODO: once sdcard has a true storage interface change from local
-                                    self._file_manager.set_additional_metadata("local", payload["path"], "plate_data",
-                                                                               plate_data, overwrite=True)
-                        except KeyError:
-                            self._logger.info(f"unable to extract from 3mf file: {file_container}")
+                    try:
+                        with zipfile.ZipFile(file_container) as zipObj:
+                            # Extract plate_1.png and plate_1.json
+                            try:
+                                zipInfo = zipObj.getinfo("Metadata/plate_1.png")
+                                zipInfo.filename = os.path.basename(png_file_name)
+                                zipObj.extract(zipInfo, png_folder_path)
+                                if os.path.exists(png_file_name):
+                                    thumb_url = f"/plugin/bambu_printer/download/thumbs/{payload['name']}.png"
+                                    self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail_src",
+                                                                               self._identifier, overwrite=True)
+                                    self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail",
+                                                                               thumb_url, overwrite=True)
+
+                                with zipObj.open("Metadata/plate_1.json", "r") as json_data:
+                                    plate_data = json.load(json_data)
+                                    if plate_data:
+                                        self._file_manager.set_additional_metadata("local", payload["path"], "plate_data",
+                                                                                   plate_data, overwrite=True)
+                            except KeyError:
+                                self._logger.info(f"Unable to extract from 3mf file: {file_container}")
+                            except Exception as e:
+                                self._logger.error(f"An error occurred during 3mf extraction for {file_container}: {e}")
+
+                            # Extract and parse slice_info.config
+                            try:
+                                with zipObj.open("Metadata/slice_info.config", "r") as config_file:
+                                    config_content = config_file.read().decode('utf-8')
+                                    parsed_config = self._parse_slice_info_config(config_content)
+
+                                    if parsed_config:
+                                        self.generate_and_store_ams_mapping(parsed_config)
+
+                                        upload_folder = self._settings.getBaseFolder("uploads")
+                                        output_json_path = os.path.join(upload_folder, "." + payload["name"] + ".json")
+
+                                        with open(output_json_path, "w") as f:
+                                            json.dump(parsed_config, f, indent=4)
+
+                                        self._logger.info(
+                                            f"Successfully extracted, parsed, and saved slice_info.config for {payload['name']} to {output_json_path}"
+                                        )
+                                    else:
+                                        self._logger.warning(
+                                            f"Parsing of slice_info.config failed for {payload['name']}"
+                                        )
+
+                            except KeyError:
+                                self._logger.info(f"Metadata/slice_info.config not found in {file_container}")
+                            except Exception as e:
+                                self._logger.error(
+                                    f"An error occurred during slice_info.config processing for {file_container}: {e}"
+                                )
+
+                    except zipfile.BadZipFile:
+                        self._logger.error(f"File is not a valid zip file: {file_container}")
+                    except Exception as e:
+                        self._logger.error(f"An unexpected error occurred while processing 3mf file {file_container}: {e}")
+
         elif event == Events.UPLOAD:
-            if payload["target"] == "local" and payload["print"] in valid_boolean_trues:
+            if payload["target"] in ["local", "sdcard"]:
                 path = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
                 filename = payload["name"]
-                with self._bambu_file_system.get_ftps_client() as ftp:
-                    if ftp.upload_file(path, filename):
-                        self._project_files_view.with_filter("", ".3mf")
-                        file_info = self._project_files_view.get_file_by_name(filename)
-                        if payload["print"] in valid_boolean_trues:
-                            self._printer.select_file(file_info.dosname, True, printAfterSelect=payload["print"] in valid_boolean_trues)
+
+                if os.path.exists(path):
+                    if filename.lower().endswith(".3mf"):
+                        with self._bambu_file_system.get_ftps_client() as ftp:
+                            if ftp.upload_file(path, filename):
+                                self._logger.info(f"Successfully FTP uploaded {filename} from {path}")
+
+                                if payload["target"] == "sdcard":
+                                    self._logger.info("Triggering SD card file list refresh (M20)")
+                                    self._printer.commands("M20")
+
+                                if payload.get("print") in valid_boolean_trues:
+                                    printer_file_path = filename
+                                    self._logger.info(f"Attempting to select and print file on printer: {printer_file_path}")
+                                    self._printer.select_file(printer_file_path, True, printAfterSelect=True)
+                    else:
+                        self._logger.info(f"Skipping FTP upload for non-.3mf file: {filename} uploaded to {payload['target']}")
+                else:
+                    self._logger.error(f"Uploaded file not found at expected path: {path}")
+            else:
+                self._logger.info(f"Upload target is not local or sdcard: {payload.get('target')}. Skipping FTP upload.")
+
+    def on_event(self, event, payload):
+        if event == Events.TRANSFER_DONE:
+            self._printer.commands("M20 L T", force=True)
+
+        elif event == Events.FILE_ADDED:
+            if payload.get("operation") == "add" and "3mf" in payload.get("type", ""):
+                file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
+
+                if os.path.exists(file_container):
+                    png_folder_path = os.path.join(self.get_plugin_data_folder(), "thumbs")
+                    if not os.path.exists(png_folder_path):
+                        os.makedirs(png_folder_path)
+                    png_file_name = os.path.join(png_folder_path, payload["name"] + ".png")
+
+                    try:
+                        with zipfile.ZipFile(file_container) as zipObj:
+                            # Extract plate_1.png and plate_1.json
+                            try:
+                                zipInfo = zipObj.getinfo("Metadata/plate_1.png")
+                                zipInfo.filename = os.path.basename(png_file_name)
+                                zipObj.extract(zipInfo, png_folder_path)
+                                if os.path.exists(png_file_name):
+                                    thumb_url = f"/plugin/bambu_printer/download/thumbs/{payload['name']}.png"
+                                    self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail_src",
+                                                                               self._identifier, overwrite=True)
+                                    self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail",
+                                                                               thumb_url, overwrite=True)
+
+                                with zipObj.open("Metadata/plate_1.json", "r") as json_data:
+                                    plate_data = json.load(json_data)
+                                    if plate_data:
+                                        self._file_manager.set_additional_metadata("local", payload["path"], "plate_data",
+                                                                                   plate_data, overwrite=True)
+                            except KeyError:
+                                self._logger.info(f"Unable to extract from 3mf file: {file_container}")
+                            except Exception as e:
+                                self._logger.error(f"An error occurred during 3mf extraction for {file_container}: {e}")
+
+                            # Extract and parse slice_info.config
+                            try:
+                                with zipObj.open("Metadata/slice_info.config", "r") as config_file:
+                                    config_content = config_file.read().decode('utf-8')
+                                    parsed_config = self._parse_slice_info_config(config_content)
+
+                                    if parsed_config:
+                                        self.generate_and_store_ams_mapping(parsed_config)
+
+                                        upload_folder = self._settings.getBaseFolder("uploads")
+                                        output_json_path = os.path.join(upload_folder, "." + payload["name"] + ".json")
+
+                                        with open(output_json_path, "w") as f:
+                                            json.dump(parsed_config, f, indent=4)
+
+                                        self._logger.info(
+                                            f"Successfully extracted, parsed, and saved slice_info.config for {payload['name']} to {output_json_path}"
+                                        )
+                                    else:
+                                        self._logger.warning(
+                                            f"Parsing of slice_info.config failed for {payload['name']}"
+                                        )
+
+                            except KeyError:
+                                self._logger.info(f"Metadata/slice_info.config not found in {file_container}")
+                            except Exception as e:
+                                self._logger.error(
+                                    f"An error occurred during slice_info.config processing for {file_container}: {e}"
+                                )
+
+                    except zipfile.BadZipFile:
+                        self._logger.error(f"File is not a valid zip file: {file_container}")
+                    except Exception as e:
+                        self._logger.error(f"An unexpected error occurred while processing 3mf file {file_container}: {e}")
+
+        elif event == Events.UPLOAD:
+            if payload["target"] in ["local", "sdcard"]:
+                path = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
+                filename = payload["name"]
+
+                if os.path.exists(path):
+                    if filename.lower().endswith(".3mf"):
+                        with self._bambu_file_system.get_ftps_client() as ftp:
+                            if ftp.upload_file(path, filename):
+                                self._logger.info(f"Successfully FTP uploaded {filename} from {path}")
+
+                                if payload["target"] == "sdcard":
+                                    self._logger.info("Triggering SD card file list refresh (M20)")
+                                    self._printer.commands("M20")
+
+                                if payload.get("print") in valid_boolean_trues:
+                                    printer_file_path = filename
+                                    self._logger.info(f"Attempting to select and print file on printer: {printer_file_path}")
+                                    self._printer.select_file(printer_file_path, True, printAfterSelect=True)
+                    else:
+                        self._logger.info(f"Skipping FTP upload for non-.3mf file: {filename} uploaded to {payload['target']}")
+                else:
+                    self._logger.error(f"Uploaded file not found at expected path: {path}")
+            else:
+                self._logger.info(f"Upload target is not local or sdcard: {payload.get('target')}. Skipping FTP upload.")
 
     def support_3mf_files(self):
         return {"machinecode": {"3mf": ["3mf"]}}
@@ -248,18 +500,55 @@ class BambuPrintPlugin(
             with measure_elapsed() as get_elapsed:
                 try:
                     with self._bambu_file_system.get_ftps_client() as ftp:
-                        if ftp.upload_file(path, f"{filename}"):
+                        existing_files = ftp.list_files()
+
+                        # Get base name and extension
+                        base_name, ext = os.path.splitext(filename)
+                        prefix = base_name[:6].lower()
+
+                        # Look for similar files that might conflict
+                        existing_filenames = [os.path.basename(f["name"]).lower() for f in existing_files]
+                        similar_files = [f for f in existing_filenames if f.startswith(prefix) and f.endswith(ext.lower())]
+
+                        # If exact name exists, delete it (safe overwrite)
+                        file_to_delete = next((Path(f["name"]) for f in existing_files if os.path.basename(f["name"]) == filename), None)
+                        if file_to_delete:
+                            self._logger.info(f"File '{filename}' already exists on SD card. Deleting '{file_to_delete}' before upload.")
+                            self._bambu_file_system.delete_file(file_to_delete)
+
+                        # Handle short name collision (e.g., cube_p~1.3mf)
+                        if filename.lower() in existing_filenames:
+                            new_index = 1
+                            while True:
+                                new_filename = f"{prefix}_{new_index}{ext}"
+                                if new_filename not in existing_filenames:
+                                    filename = new_filename
+                                    break
+                                new_index += 1
+                            self._logger.info(f"Filename collision detected. Uploading as '{filename}' instead.")
+
+                        # Upload file
+                        if ftp.upload_file(path, filename):
                             sd_upload_succeeded(filename, filename, get_elapsed())
+                            # Refresh file list
+                            self.refresh_file_list()  # Trigger file list refresh after upload
                         else:
                             raise Exception("upload failed")
                 except Exception as e:
                     sd_upload_failed(filename, filename, get_elapsed())
-                    self._logger.exception(e)
+                    self._logger.exception("Upload failed with exception", exc_info=e)
 
         thread = threading.Thread(target=process)
         thread.daemon = True
         thread.start()
         return filename
+
+
+    def refresh_file_list(self):
+        """Method to trigger a refresh of the file list."""
+        self._logger.debug("Refreshing file list.")
+        # Assuming you have access to OctoPrint API to trigger refresh, you can use:
+        self._printer.commands("M20")  # This command triggers a refresh of the SD card file list
 
     def get_template_vars(self):
         return {"plugin_version": self._plugin_version}
