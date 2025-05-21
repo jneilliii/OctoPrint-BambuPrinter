@@ -580,6 +580,123 @@ class BambuVirtualPrinter:
                 self._log.debug(f"{percent}% speed adjustment command sent successfully")
         return True
 
+    @gcode_executor.register_no_data("M1111")
+    def _handle_m1111_refined_parse(self) -> bool: # Renamed
+        """
+        Custom debug command to report the real-time physical AMS status.
+        Reads cached data from self.ams_data based on confirmed structure
+        and outputs parsed data to the OctoPrint terminal.
+        """
+        self._log.debug("M1111 command received (refined parse). Reporting physical AMS status.")
+
+        # Read cached data directly from the self.ams_data attribute
+        cached_ams_data = self.ams_data
+
+        self._log.info("Reading cached AMS data from self.ams_data for refined parsing.")
+        # Log the raw data content to the log file as well
+        self._log.debug(f"REFINED_PARSE: Content of self.ams_data: {cached_ams_data}")
+
+
+        if not cached_ams_data or not isinstance(cached_ams_data, list):
+            self.sendIO("echo: No physical AMS tray data available in cache (self.ams_data is empty or malformed).\n")
+        else:
+            self.sendIO("echo: --- Physical AMS Status (Parsed from self.ams_data) ---\n")
+
+            # --- ADDITION START ---
+            # Output the raw cached data to the terminal for debugging
+            try:
+                # Use repr() to get a string representation that includes quotes for strings, etc.
+                raw_data_string = repr(cached_ams_data)
+                # Split into smaller chunks if needed, though sendIO might handle large strings.
+                # If it struggles with very large outputs, you might need chunking.
+                # For typical AMS data, sending as one string should be fine.
+                self.sendIO(f"echo: RAW self.ams_data content: {raw_data_string}\n")
+                self._log.debug("REFINED_PARSE: Sent raw data content to terminal.")
+            except Exception as e:
+                self._log.error(f"REFINED_PARSE: Error outputting raw data to terminal: {type(e).__name__}: {e}", exc_info=True)
+                self.sendIO(f"echo: Error outputting raw AMS data: {e}\n")
+            # --- ADDITION END ---
+
+
+            parsed_ams_trays = [] # List to hold parsed tray data before printing
+
+            try:
+                # Iterate through the top-level list (each item represents an AMS unit's data structure)
+                for unit_index, ams_unit_container in enumerate(cached_ams_data):
+                    self._log.debug(f"REFINED_PARSE: Processing AMS unit container {unit_index}. Content: {ams_unit_container}")
+                    # Check if the item is a dictionary and contains the 'tray' key which holds a list
+                    if (isinstance(ams_unit_container, dict)
+                            and 'tray' in ams_unit_container
+                            and isinstance(ams_unit_container['tray'], list)):
+
+                        # Access the list of trays directly from the 'tray' key
+                        ams_unit_trays = ams_unit_container['tray']
+                        self._log.debug(f"REFINED_PARSE: Found 'tray' list for unit {unit_index}. Number of trays: {len(ams_unit_trays)}")
+
+                        # Iterate through the list of individual trays for this unit
+                        for slot_index, tray in enumerate(ams_unit_trays):
+                            self._log.debug(f"REFINED_PARSE: Processing tray {slot_index} in unit {unit_index}. Content: {tray}")
+                            # Check if the tray is a dictionary and has 'type' and 'color' keys
+                            if tray and isinstance(tray, dict) and 'type' in tray and 'color' in tray:
+                                material = tray.get("type", "Unknown") # Key is 'type'
+                                color = tray.get("color", "00000000") # Key is 'color'
+
+                                # Calculate Global ID (assuming 4 slots per unit)
+                                # Global ID = (Unit Index * 4) + Slot Index
+                                global_id = (unit_index * 4) + slot_index # Use 4 slots per unit as typical
+
+                                # Process color: remove the last two characters (alpha channel)
+                                processed_color = color[:6] if color and len(color) >= 6 else "000000"
+
+                                parsed_ams_trays.append({
+                                    'global_id': global_id,
+                                    'type': material,
+                                    'color': processed_color,
+                                    'unit': unit_index,
+                                    'slot': slot_index
+                                })
+                                self._log.debug(f"REFINED_PARSE: Parsed tray Unit {unit_index}, Slot {slot_index}. Global ID: {global_id}, Type: {material}, Color: #{processed_color}")
+
+                            else:
+                                self._log.debug(f"REFINED_PARSE: Skipping malformed tray data (not dict or missing type/color) at Unit {unit_index}, Slot {slot_index}.")
+                    else:
+                        self._log.debug(f"REFINED_PARSE: Skipping malformed AMS unit container data (not dict or missing 'tray' list) at index {unit_index}.")
+
+            except Exception as e:
+                self._log.error(f"REFINED_PARSE: Error during cached data parsing: {type(e).__name__}: {e}", exc_info=True)
+                self.sendIO(f"echo: Error parsing cached AMS data: {e}\n")
+                parsed_ams_trays = [] # Clear list on error
+
+
+            # Now send the parsed data to the terminal
+            if parsed_ams_trays:
+                 for tray_data in parsed_ams_trays:
+                      output_line = (
+                           f"echo: AMS Unit {tray_data.get('unit', '?')}, Slot {tray_data.get('slot', '?')}"
+                           f" (Global ID: {tray_data.get('global_id', '?')})"
+                           f" - Type: {tray_data.get('type', 'Unknown')}, Color: #{tray_data.get('color', '000000')}\n" # Add # to color
+                      )
+                      self.sendIO(output_line)
+                      self._log.debug(f"REFINED_PARSE: Sent terminal output for Global ID {tray_data.get('global_id', '?')}.")
+            else:
+                 # This message will now be printed if the parsed_ams_trays list ends up empty
+                 # even if raw data was present, indicating a parsing failure.
+                 self.sendIO("echo: Parsed data list is empty (check raw data and logs for parsing errors).\n")
+
+
+            self.sendIO("echo: -----------------------------------------------------\n")
+
+        # Send the standard "ok N+1" response to acknowledge the command
+        try:
+            next_expected_line = self._serial_io.lastN + 1
+            self.sendIO(f"ok {next_expected_line}\n")
+        except Exception as e:
+             self._log.error(f"REFINED_PARSE: Error sending ok N+1: {type(e).__name__}: {e}", exc_info=True)
+
+        self._log.debug("M1111 command finished (refined parse).")
+        return True # Indicate the command was handled
+
+
     def _process_gcode_serial_command(self, gcode: str, full_command: str):
         self._log.debug(f"processing gcode {gcode} command = {full_command}")
 
