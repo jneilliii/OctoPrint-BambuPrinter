@@ -40,6 +40,7 @@ from octoprint_bambu_printer.printer.file_system.bambu_timelapse_file_info impor
 )
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
 import shutil
+from octoprint_bambu_printer.printer.estimator import BambuGcodeAnalysisQueue
 
 
 @contextmanager
@@ -68,6 +69,8 @@ class BambuPrintPlugin(
     _timelapse_files_view: CachedFileView
     _project_files_view: CachedFileView
     _bambu_cloud: None
+    _slicer_estimator_helper = None
+    se_update_metadata_in_file = None
 
     def on_settings_initialized(self):
         self._bambu_file_system = RemoteSDCardFileList(self._settings)
@@ -91,6 +94,12 @@ class BambuPrintPlugin(
         if not os.path.exists(os.path.join(self.get_plugin_data_folder(), "thumbs", "no_thumb.png")):
             self._logger.info("Creating no_thumb.png")
             shutil.copy(os.path.join(self._basefolder, "static", "img", "no_thumb.png"), os.path.join(self.get_plugin_data_folder(), "thumbs"))
+
+        self._slicer_estimator_helper = self._plugin_manager.get_helpers("SlicerEstimator", "update_metadata_in_file")
+        if self._slicer_estimator_helper is None or "update_metadata_in_file" not in self._slicer_estimator_helper:
+            self._logger.info("Missing SlicerEstimator plugin for gcode metadata extraction")
+        else:
+            self.se_update_metadata_in_file = self._slicer_estimator_helper["update_metadata_in_file"]
 
     def get_template_configs(self):
         return [
@@ -186,36 +195,49 @@ class BambuPrintPlugin(
     def on_event(self, event, payload):
         if event == Events.TRANSFER_DONE:
             self._printer.commands("M20 L T", force=True)
-        elif event == Events.FILE_ADDED:
-            if payload["operation"] == "add" and "3mf" in payload["type"]:
-                file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
-                if os.path.exists(file_container):
-                    png_folder_path = os.path.join(self.get_plugin_data_folder(), "thumbs")
-                    if not os.path.exists(png_folder_path):
-                        os.makedirs(png_folder_path)
-                    png_file_name = os.path.join(png_folder_path, payload["name"] + ".png")
-                    with zipfile.ZipFile(file_container) as zipObj:
-                        try:
-                            # extract thumbnail
-                            zipInfo = zipObj.getinfo("Metadata/plate_1.png")
-                            zipInfo.filename = os.path.basename(png_file_name)
-                            zipObj.extract(zipInfo, png_folder_path)
-                            if os.path.exists(png_file_name):
-                                thumb_url = f"/plugin/bambu_printer/download/thumbs/{payload['name']}.png"
-                                self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail_src",
-                                                                           self._identifier, overwrite=True)
-                                self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail",
-                                                                           thumb_url, overwrite=True)
-
-                            # extract plate data
-                            with zipObj.open("Metadata/plate_1.json", "r") as json_data:
-                                plate_data = json.load(json_data)
-                                if plate_data:
-                                    # TODO: once sdcard has a true storage interface change from local
-                                    self._file_manager.set_additional_metadata("local", payload["path"], "plate_data",
-                                                                               plate_data, overwrite=True)
-                        except KeyError:
-                            self._logger.info(f"unable to extract from 3mf file: {file_container}")
+        # elif event == Events.FILE_ADDED:
+        #     if payload["operation"] == "add" and "3mf" in payload["type"]:
+        #         file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
+        #         if os.path.exists(file_container):
+        #             png_folder_path = os.path.join(self.get_plugin_data_folder(), "thumbs")
+        #             if not os.path.exists(png_folder_path):
+        #                 os.makedirs(png_folder_path)
+        #             png_file_name = os.path.join(png_folder_path, payload["name"] + ".png")
+        #             with zipfile.ZipFile(file_container) as zipObj:
+        #                 try:
+        #                     # extract thumbnail
+        #                     zipInfo = zipObj.getinfo("Metadata/plate_1.png")
+        #                     zipInfo.filename = os.path.basename(png_file_name)
+        #                     zipObj.extract(zipInfo, png_folder_path)
+        #                     if os.path.exists(png_file_name):
+        #                         thumb_url = f"/plugin/bambu_printer/download/thumbs/{payload['name']}.png"
+        #                         self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail_src",
+        #                                                                    self._identifier, overwrite=True)
+        #                         self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail",
+        #                                                                    thumb_url, overwrite=True)
+        #
+        #                     # extract plate data
+        #                     with zipObj.open("Metadata/plate_1.json", "r") as json_data:
+        #                         plate_data = json.load(json_data)
+        #                         if plate_data:
+        #                             # TODO: once sdcard has a true storage interface change from local
+        #                             self._file_manager.set_additional_metadata("local", payload["path"], "plate_data",
+        #                                                                        plate_data, overwrite=True)
+        #
+        #                     # extract gcode for SlicerEstimator processing
+        #                     # if self.se_update_metadata_in_file is not None:
+        #                     #     gcode_folder_path = os.path.join(self.get_plugin_data_folder(), "gcode")
+        #                     #     gcode_file_path = os.path.join(gcode_folder_path, payload["name"] + ".gcode")
+        #                     #     if not os.path.exists(gcode_folder_path):
+        #                     #         os.makedirs(gcode_folder_path)
+        #                     #     zipGcodeFile = zipObj.getinfo("Metadata/plate_1.gcode")
+        #                     #     zipGcodeFile.filename = os.path.basename(gcode_file_path)
+        #                     #     zipObj.extract(zipGcodeFile, gcode_folder_path)
+        #                     #     if os.path.exists(gcode_file_path):
+        #                     #         self.se_update_metadata_in_file(f"{payload['path']}", f"{gcode_file_path}")
+        #
+        #                 except KeyError:
+        #                     self._logger.info(f"unable to extract from 3mf file: {file_container}")
         elif event == Events.UPLOAD:
             if payload["target"] == "local" and payload["print"] in valid_boolean_trues:
                 path = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
@@ -301,6 +323,32 @@ class BambuPrintPlugin(
         else:
             return []
 
+    # ~~ preprocessor hook
+
+    def process_3mf_upload(self, path, file_object, links=None, printer_profile=None, allow_overwrite=True, *args, **kwargs):
+        # TODO: put all file extraction stuff here instead of file add event?
+        self._logger.info(f"Preprocessing uploaded file {path}")
+        extensions = [".3mf"]
+        name, extension = os.path.splitext(file_object.filename)
+        if extension in extensions:
+            file_data_path = str(os.path.join(self.get_plugin_data_folder(), path))
+            metadata_path = os.path.join(file_data_path, "Metadata")
+            if not os.path.exists(file_data_path):
+                os.makedirs(file_data_path)
+
+            with zipfile.ZipFile(file_object.path) as zipObj:
+                try:
+                    zipObj.extractall(file_data_path)
+                except Exception as e:
+                    self._logger.info(f"unable to extract from 3mf file: {path}, {e}")
+
+        return file_object
+
+    # analysis factory hook
+
+    def analysis_queue_factory(self, *args, **kwargs):
+        return {'3mf': lambda finished_callback: BambuGcodeAnalysisQueue(finished_callback, self)}
+
     def get_timelapse_file_list(self):
         if flask.request.path.startswith("/api/timelapse"):
             def process():
@@ -382,7 +430,7 @@ class BambuPrintPlugin(
                 r"/download/thumbs/(.*)",
                 LargeResponseHandlerWithFallback,
                 {
-                    "path": os.path.join(self.get_plugin_data_folder(), "thumbs"),
+                    "path": self.get_plugin_data_folder(),
                     "default_filename": "no_thumb.png",
                     "allow_client_caching": False,
                     # "as_attachment": True,

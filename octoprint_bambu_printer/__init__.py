@@ -22,4 +22,6 @@ def __plugin_load__():
         "octoprint.plugin.softwareupdate.check_config": __plugin_implementation__.get_update_information,
         "octoprint.server.api.before_request": __plugin_implementation__._hook_octoprint_server_api_before_request,
         "octoprint.server.http.routes": __plugin_implementation__.route_hook,
+		"octoprint.filemanager.preprocessor": __plugin_implementation__.process_3mf_upload,
+        "octoprint.filemanager.analysis.factory": __plugin_implementation__.analysis_queue_factory,
     }

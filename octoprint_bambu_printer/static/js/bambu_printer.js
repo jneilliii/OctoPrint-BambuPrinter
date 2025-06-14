@@ -32,7 +32,7 @@ $(function () {
 
         self.filesViewModel.bambu_thumb_src = function(data) {
             console.log(data);
-            return 'plugin/bambu_printer/download/thumbs/' + data.display + '.png?' + data.date;
+            return data.thumbnail + '?' + data.date;
         }
 
         self.ams_mapping_computed = function(){
@@ -197,11 +197,9 @@ $(function () {
         };
 
         $(document).ready(function(){
-			let inline_thumbnail_template = '<div class="bambu_inline_thumbnail pull-left" ' +
-			                                'data-bind="if: $data.origin == \'sdcard\'">' +
-			                                '<img class="bambu_thumb" data-bind="attr: {src: $root.bambu_thumb_src($data)}, ' +
-			                                'visible: $data.origin == \'sdcard\', "' +
-			                                'style="display: none;"/></div>';
+			let inline_thumbnail_template = '<div class="bambu_inline_thumbnail pull-left">' +
+			                                '<img class="bambu_thumb" data-bind="attr: {src: $root.bambu_thumb_src($data)}"/>' +
+			                                '</div>';
 
 			$("#files_template_machinecode").text(function () {
 				return inline_thumbnail_template + $(this).text();;
