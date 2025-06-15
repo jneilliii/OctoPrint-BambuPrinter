@@ -139,6 +139,11 @@ class BambuPrintPlugin(
             data["auth_token"] = ""
         octoprint.plugin.SettingsPlugin.on_settings_save(self, data)
 
+    # SimpileApiPlugin mixin
+
+    def is_api_protected(self) -> bool:
+        return True
+
     def is_api_adminonly(self):
         return True
 
@@ -193,6 +198,7 @@ class BambuPrintPlugin(
                     )
 
     def on_event(self, event, payload):
+        # TODO: add file remove event to delete folder from plugin data folder
         if event == Events.TRANSFER_DONE:
             self._printer.commands("M20 L T", force=True)
         # elif event == Events.FILE_ADDED:

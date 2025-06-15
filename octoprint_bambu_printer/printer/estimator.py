@@ -58,8 +58,9 @@ class BambuGcodeAnalysisQueue(GcodeAnalysisQueue):
             result = super(BambuGcodeAnalysisQueue, self)._do_analysis(high_priority)
 
             if os.path.exists(gcode_file_path):
-                gcode_queue_entry = QueueEntry(self._current.name, path, "gcode", self._current.location, gcode_file_path, self._current.printer_profile, self._current.analysis)
-                super(BambuGcodeAnalysisQueue, self).enqueue(gcode_queue_entry)
+                # this causes an analysis loop...
+                # gcode_queue_entry = QueueEntry(self._current.name, path, "gcode", self._current.location, gcode_file_path, self._current.printer_profile, self._current.analysis)
+                # super(BambuGcodeAnalysisQueue, self).enqueue(gcode_queue_entry)
 
                 with open(gcode_file_path, "r") as gcode_file:
                     for line in gcode_file:
