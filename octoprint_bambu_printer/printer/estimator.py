@@ -45,6 +45,11 @@ class BambuGcodeAnalysisQueue(GcodeAnalysisQueue):
 
             found_eta = False
 
+            result = super(BambuGcodeAnalysisQueue, self)._do_analysis(high_priority)
+
+            if self._current.type != "3mf":
+                return result
+
             path = self._current.path
             metadata_path = str(os.path.join(self._plugin.get_plugin_data_folder(), path, "Metadata"))
             gcode_file_path = os.path.join(metadata_path, "plate_1.gcode")
@@ -55,12 +60,9 @@ class BambuGcodeAnalysisQueue(GcodeAnalysisQueue):
                 file_object = DiskFileWrapper(path, self._current.absolute_path, move=False)
                 self._plugin.process_3mf_upload(path, file_object)
 
-            result = super(BambuGcodeAnalysisQueue, self)._do_analysis(high_priority)
-
             if os.path.exists(gcode_file_path):
-                # this causes an analysis loop...
-                # gcode_queue_entry = QueueEntry(self._current.name, path, "gcode", self._current.location, gcode_file_path, self._current.printer_profile, self._current.analysis)
-                # super(BambuGcodeAnalysisQueue, self).enqueue(gcode_queue_entry)
+                gcode_queue_entry = QueueEntry(self._current.name, path, "gcode", self._current.location, gcode_file_path, self._current.printer_profile, self._current.analysis)
+                super(BambuGcodeAnalysisQueue, self).enqueue(gcode_queue_entry)
 
                 with open(gcode_file_path, "r") as gcode_file:
                     for line in gcode_file:
