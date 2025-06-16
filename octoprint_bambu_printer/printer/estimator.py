@@ -27,16 +27,28 @@ import json
 
 import octoprint.filemanager.analysis
 from octoprint.filemanager.analysis import AnalysisAborted
-from octoprint.filemanager.analysis import GcodeAnalysisQueue, QueueEntry
+from octoprint.filemanager.analysis import QueueEntry
 from octoprint.filemanager.util import DiskFileWrapper
 
+try:
+    from octoprint_PrintTimeGenius import GeniusAnalysisQueue
+    BaseAnalysisQueue = GeniusAnalysisQueue
+    requires_plugin_arg = True
+except ImportError:
+    from octoprint.filemanager.analysis import GcodeAnalysisQueue
+    BaseAnalysisQueue = GcodeAnalysisQueue
+    requires_plugin_arg = False
 
-class BambuGcodeAnalysisQueue(GcodeAnalysisQueue):
+
+class BambuGcodeAnalysisQueue(BaseAnalysisQueue):
     """Initial estimation."""
 
     def __init__(self, finished_callback, plugin):
-        super(BambuGcodeAnalysisQueue, self).__init__(finished_callback)
         self._plugin = plugin
+        if requires_plugin_arg:
+            super(BambuGcodeAnalysisQueue, self).__init__(finished_callback, plugin)
+        else:
+            super(BambuGcodeAnalysisQueue, self).__init__(finished_callback)
 
     def _do_analysis(self, high_priority=True):
         try:
