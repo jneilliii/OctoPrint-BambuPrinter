@@ -1,6 +1,4 @@
 from __future__ import absolute_import, annotations
-
-import json
 from pathlib import Path
 import threading
 from time import perf_counter
@@ -10,7 +8,7 @@ import logging.handlers
 from urllib.parse import quote as urlquote
 import os
 import zipfile
-
+import shutil
 import octoprint.printer
 import octoprint.server
 import octoprint.plugin
@@ -23,25 +21,20 @@ from octoprint.server.util.tornado import (
     LargeResponseHandler,
     path_validation_factory,
 )
-from.LargeResponseHandlerWithFallback import LargeResponseHandlerWithFallback
+from .LargeResponseHandlerWithFallback import LargeResponseHandlerWithFallback
 from octoprint.access.permissions import Permissions
 from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
-
 from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
 from octoprint_bambu_printer.printer.pybambu import BambuCloud
-
 from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import (
     RemoteSDCardFileList,
 )
-
 from octoprint_bambu_printer.printer.file_system.bambu_timelapse_file_info import (
     BambuTimelapseFileInfo,
     FileInfo
 )
 from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
-import shutil
 from octoprint_bambu_printer.printer.estimator import BambuGcodeAnalysisQueue
-
 
 @contextmanager
 def measure_elapsed():
@@ -93,7 +86,8 @@ class BambuPrintPlugin(
     def on_after_startup(self):
         if not os.path.exists(os.path.join(self.get_plugin_data_folder(), "thumbs", "no_thumb.png")):
             self._logger.info("Creating no_thumb.png")
-            shutil.copy(os.path.join(self._basefolder, "static", "img", "no_thumb.png"), os.path.join(self.get_plugin_data_folder(), "thumbs"))
+            shutil.copy(os.path.join(self._basefolder, "static", "img", "no_thumb.png"),
+                        os.path.join(self.get_plugin_data_folder(), "thumbs"))
 
         self._slicer_estimator_helper = self._plugin_manager.get_helpers("SlicerEstimator", "update_metadata_in_file")
         if self._slicer_estimator_helper is None or "update_metadata_in_file" not in self._slicer_estimator_helper:
@@ -198,52 +192,13 @@ class BambuPrintPlugin(
                     )
 
     def on_event(self, event, payload):
-        # TODO: add file remove event to delete folder from plugin data folder
         if event == Events.TRANSFER_DONE:
             self._printer.commands("M20 L T", force=True)
-        # elif event == Events.FILE_ADDED:
-        #     if payload["operation"] == "add" and "3mf" in payload["type"]:
-        #         file_container = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
-        #         if os.path.exists(file_container):
-        #             png_folder_path = os.path.join(self.get_plugin_data_folder(), "thumbs")
-        #             if not os.path.exists(png_folder_path):
-        #                 os.makedirs(png_folder_path)
-        #             png_file_name = os.path.join(png_folder_path, payload["name"] + ".png")
-        #             with zipfile.ZipFile(file_container) as zipObj:
-        #                 try:
-        #                     # extract thumbnail
-        #                     zipInfo = zipObj.getinfo("Metadata/plate_1.png")
-        #                     zipInfo.filename = os.path.basename(png_file_name)
-        #                     zipObj.extract(zipInfo, png_folder_path)
-        #                     if os.path.exists(png_file_name):
-        #                         thumb_url = f"/plugin/bambu_printer/download/thumbs/{payload['name']}.png"
-        #                         self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail_src",
-        #                                                                    self._identifier, overwrite=True)
-        #                         self._file_manager.set_additional_metadata("local", payload["path"], "thumbnail",
-        #                                                                    thumb_url, overwrite=True)
-        #
-        #                     # extract plate data
-        #                     with zipObj.open("Metadata/plate_1.json", "r") as json_data:
-        #                         plate_data = json.load(json_data)
-        #                         if plate_data:
-        #                             # TODO: once sdcard has a true storage interface change from local
-        #                             self._file_manager.set_additional_metadata("local", payload["path"], "plate_data",
-        #                                                                        plate_data, overwrite=True)
-        #
-        #                     # extract gcode for SlicerEstimator processing
-        #                     # if self.se_update_metadata_in_file is not None:
-        #                     #     gcode_folder_path = os.path.join(self.get_plugin_data_folder(), "gcode")
-        #                     #     gcode_file_path = os.path.join(gcode_folder_path, payload["name"] + ".gcode")
-        #                     #     if not os.path.exists(gcode_folder_path):
-        #                     #         os.makedirs(gcode_folder_path)
-        #                     #     zipGcodeFile = zipObj.getinfo("Metadata/plate_1.gcode")
-        #                     #     zipGcodeFile.filename = os.path.basename(gcode_file_path)
-        #                     #     zipObj.extract(zipGcodeFile, gcode_folder_path)
-        #                     #     if os.path.exists(gcode_file_path):
-        #                     #         self.se_update_metadata_in_file(f"{payload['path']}", f"{gcode_file_path}")
-        #
-        #                 except KeyError:
-        #                     self._logger.info(f"unable to extract from 3mf file: {file_container}")
+        elif event == Events.FILE_REMOVED:
+            if "3mf" in payload["type"]:
+                metadata_folder = str(os.path.join(self.get_plugin_data_folder(), "gcode", payload["path"]))
+                if os.path.exists(metadata_folder):
+                    shutil.rmtree(metadata_folder)
         elif event == Events.UPLOAD:
             if payload["target"] == "local" and payload["print"] in valid_boolean_trues:
                 path = os.path.join(self._settings.getBaseFolder("uploads"), payload["path"])
@@ -253,7 +208,8 @@ class BambuPrintPlugin(
                         self._project_files_view.with_filter("", ".3mf")
                         file_info = self._project_files_view.get_file_by_name(filename)
                         if payload["print"] in valid_boolean_trues:
-                            self._printer.select_file(file_info.dosname, True, printAfterSelect=payload["print"] in valid_boolean_trues)
+                            self._printer.select_file(file_info.dosname, True,
+                                                      printAfterSelect=payload["print"] in valid_boolean_trues)
 
     def support_3mf_files(self):
         return {"machinecode": {"3mf": ["3mf"]}}
@@ -331,14 +287,13 @@ class BambuPrintPlugin(
 
     # ~~ preprocessor hook
 
-    def process_3mf_upload(self, path, file_object, links=None, printer_profile=None, allow_overwrite=True, *args, **kwargs):
-        # TODO: put all file extraction stuff here instead of file add event?
+    def process_3mf_upload(self, path, file_object, links=None, printer_profile=None, allow_overwrite=True, *args,
+                           **kwargs):
         self._logger.info(f"Preprocessing uploaded file {path}")
         extensions = [".3mf"]
         name, extension = os.path.splitext(file_object.filename)
         if extension in extensions:
-            file_data_path = str(os.path.join(self.get_plugin_data_folder(), path))
-            metadata_path = os.path.join(file_data_path, "Metadata")
+            file_data_path = str(os.path.join(self.get_plugin_data_folder(), "gcode", path))
             if not os.path.exists(file_data_path):
                 os.makedirs(file_data_path)
 
@@ -436,7 +391,7 @@ class BambuPrintPlugin(
                 r"/download/thumbs/(.*)",
                 LargeResponseHandlerWithFallback,
                 {
-                    "path": self.get_plugin_data_folder(),
+                    "path": os.path.join(self.get_plugin_data_folder(), "gcode"),
                     "default_filename": "no_thumb.png",
                     "allow_client_caching": False,
                     # "as_attachment": True,

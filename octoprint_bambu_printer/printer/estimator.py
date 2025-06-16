@@ -51,7 +51,7 @@ class BambuGcodeAnalysisQueue(GcodeAnalysisQueue):
                 return result
 
             path = self._current.path
-            metadata_path = str(os.path.join(self._plugin.get_plugin_data_folder(), path, "Metadata"))
+            metadata_path = str(os.path.join(self._plugin.get_plugin_data_folder(), "gcode", path, "Metadata"))
             gcode_file_path = os.path.join(metadata_path, "plate_1.gcode")
             thumbnail_file_path = os.path.join(metadata_path, "plate_1.png")
             json_file_path = os.path.join(metadata_path, "plate_1.json")
