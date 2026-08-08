@@ -1,45 +1,44 @@
-from __future__ import absolute_import, annotations
+from __future__ import annotations
 
 import json
-from pathlib import Path
-import threading
-from time import perf_counter
-from contextlib import contextmanager
-import flask
 import logging.handlers
-from urllib.parse import quote as urlquote
 import os
+import shutil
+import threading
 import zipfile
+from contextlib import contextmanager
+from pathlib import Path
+from time import perf_counter
+from urllib.parse import quote as urlquote
 
+import flask
+import octoprint.plugin
 import octoprint.printer
 import octoprint.server
-import octoprint.plugin
-from octoprint.events import Events
 import octoprint.settings
-from octoprint.settings import valid_boolean_trues
-from octoprint.util import is_hidden_path
+from octoprint.access.permissions import Permissions
+from octoprint.events import Events
+from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
 from octoprint.server.util.flask import no_firstrun_access
 from octoprint.server.util.tornado import (
     LargeResponseHandler,
     path_validation_factory,
 )
-from.LargeResponseHandlerWithFallback import LargeResponseHandlerWithFallback
-from octoprint.access.permissions import Permissions
-from octoprint.logging.handlers import CleaningTimedRotatingFileHandler
+from octoprint.settings import valid_boolean_trues
+from octoprint.util import is_hidden_path
 
+from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
+from octoprint_bambu_printer.printer.file_system.bambu_timelapse_file_info import (
+    BambuTimelapseFileInfo,
+)
 from octoprint_bambu_printer.printer.file_system.cached_file_view import CachedFileView
-from octoprint_bambu_printer.printer.pybambu import BambuCloud
-
 from octoprint_bambu_printer.printer.file_system.remote_sd_card_file_list import (
     RemoteSDCardFileList,
 )
+from octoprint_bambu_printer.printer.pybambu import BambuCloud
 
-from octoprint_bambu_printer.printer.file_system.bambu_timelapse_file_info import (
-    BambuTimelapseFileInfo,
-    FileInfo
-)
-from octoprint_bambu_printer.printer.bambu_virtual_printer import BambuVirtualPrinter
-import shutil
+from .LargeResponseHandlerWithFallback import LargeResponseHandlerWithFallback
+from .printer.pybambu.bambu_cloud import CodeRequiredError, TfaCodeRequiredError
 
 
 @contextmanager
@@ -146,13 +145,27 @@ class BambuPrintPlugin(
                 and "auth_token" in data
             ):
                 self._logger.info(f"Registering user {data['email']}")
-                self._bambu_cloud = BambuCloud(data["region"], data["email"], data["password"], data["auth_token"])
-                auth_response = self._bambu_cloud.login(data["region"], data["email"], data["password"])
-                return flask.jsonify(
-                    {
-                        "auth_response": auth_response,
-                    }
-                )
+                try:
+                    self._bambu_cloud = BambuCloud(data["region"], data["email"], data["password"], data["auth_token"])
+                    auth_response = self._bambu_cloud.login(data["region"], data["email"], data["password"])
+                    return flask.jsonify(
+                        {
+                            "auth_response": "success",
+                        }
+                    )
+                except CodeRequiredError:
+                    return flask.jsonify(
+                        {
+                            "auth_response": "verifyCode",
+                        }
+                    )
+                except TfaCodeRequiredError:
+                    return flask.jsonify(
+                        {
+                            "auth_response": "tfa",
+                        }
+                    )
+
         elif command == "verify":
             auth_response = None
             if (

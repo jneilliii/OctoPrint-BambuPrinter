@@ -1,4 +1,3 @@
-# coding=utf-8
 
 __plugin_name__ = "Bambu Printer"
 __plugin_pythoncompat__ = ">=3.7,<4"

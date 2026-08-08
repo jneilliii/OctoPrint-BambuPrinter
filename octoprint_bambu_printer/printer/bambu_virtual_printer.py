@@ -181,7 +181,7 @@ class BambuVirtualPrinter:
         print_job_state = device_data.print_job.gcode_state
         temperatures = device_data.temperature
         # strip out extra data to avoid unneeded settings updates
-        ams_data = [{"tray": asdict(x).pop("tray", None)} for x in device_data.ams.data if x is not None]
+        ams_data = [{"tray": asdict(device_data.ams.data[x]).pop("tray", None)} for x in device_data.ams.data if x is not None]
 
         if self.ams_data != ams_data:
             self._log.debug(f"Recieveid AMS Update: {ams_data}")
@@ -190,8 +190,8 @@ class BambuVirtualPrinter:
             self._settings.save(trigger_event=True)
 
         self.lastTempAt = time.monotonic()
-        self._telemetry.temp[0] = temperatures.nozzle_temp
-        self._telemetry.targetTemp[0] = temperatures.target_nozzle_temp
+        self._telemetry.temp[0] = temperatures.nozzle_temps[0]
+        self._telemetry.targetTemp[0] = temperatures.target_nozzle_temps[0]
         self._telemetry.bedTemp = temperatures.bed_temp
         self._telemetry.bedTargetTemp = temperatures.target_bed_temp
         self._telemetry.chamberTemp = temperatures.chamber_temp

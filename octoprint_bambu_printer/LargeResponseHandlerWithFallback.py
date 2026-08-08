@@ -1,5 +1,6 @@
-from octoprint.server.util.tornado import LargeResponseHandler
 import os
+
+from octoprint.server.util.tornado import LargeResponseHandler
 
 
 class LargeResponseHandlerWithFallback(LargeResponseHandler):

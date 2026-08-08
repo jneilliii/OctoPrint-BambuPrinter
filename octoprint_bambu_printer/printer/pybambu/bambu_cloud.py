@@ -4,30 +4,39 @@ from enum import (
 )
 
 import base64
-import cloudscraper
 import json
 import requests
+
+cloudscraper_available = False
+try:
+    import cloudscraper
+    cloudscraper_available = True
+except ImportError:
+    cloudscraper_available = False
+
+curl_available = False
+try:
+    from curl_cffi import requests as curl_requests
+    curl_available = True
+except ImportError:
+    curl_available = False
 
 class ConnectionMechanismEnum(Enum):
     CLOUDSCRAPER = 1,
     CURL_CFFI = 2,
     REQUESTS = 3
 
-CONNECTION_MECHANISM = ConnectionMechanismEnum.CLOUDSCRAPER
-
-curl_available = False
-if CONNECTION_MECHANISM == ConnectionMechanismEnum.CURL_CFFI:
-    try:
-        from curl_cffi import requests as curl_requests
-        curl_available = True
-    except ImportError:
-        curl_available = False
+if cloudscraper_available:
+    CONNECTION_MECHANISM = ConnectionMechanismEnum.CLOUDSCRAPER
+else:
+    CONNECTION_MECHANISM = ConnectionMechanismEnum.REQUESTS
 
 from dataclasses import dataclass
 
 from .const import (
      LOGGER,
-     BambuUrl
+     BambuUrl,
+     Printers
 )
 
 from .utils import get_Url
@@ -39,17 +48,17 @@ class CloudflareError(Exception):
         super().__init__("Blocked by Cloudflare")
         self.error_code = 403
 
-class EmailCodeRequiredError(Exception):
+class CodeRequiredError(Exception):
     def __init__(self):
         super().__init__("Email code required")
         self.error_code = 400
 
-class EmailCodeExpiredError(Exception):
+class CodeExpiredError(Exception):
     def __init__(self):
         super().__init__("Email code expired")
         self.error_code = 400
 
-class EmailCodeIncorrectError(Exception):
+class CodeIncorrectError(Exception):
     def __init__(self):
         super().__init__("Email code incorrect")
         self.error_code = 400
@@ -63,6 +72,11 @@ class CurlUnavailableError(Exception):
     def __init__(self):
         super().__init__("curl library unavailable")
         self.error_code = 400
+
+class CsrfError(Exception):
+    def __init__(self):
+        super().__init__("Blocked by CSRF cookie requirement")
+        self.error_code = 403
 
 @dataclass
 class BambuCloud:
@@ -87,7 +101,8 @@ class BambuCloud:
             'X-BBL-Executable-info': '{}',
             'X-BBL-Agent-OS-Type': 'linux',
             'accept': 'application/json',
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Accept-Encoding': 'gzip, deflate'
         }
         # Orca/Bambu Studio also add this - need to work out what an appropriate ID is to put here:
         # 'X-BBL-Device-ID': BBL_AUTH_UUID,
@@ -104,15 +119,21 @@ class BambuCloud:
     def _test_response(self, response, return400=False):
         # Check specifically for cloudflare block
         if response.status_code == 403 and 'cloudflare' in response.text:
-            LOGGER.debug("BLOCKED BY CLOUDFLARE")
+            LOGGER.error("BLOCKED BY CLOUDFLARE")
             raise CloudflareError()
-
-        if response.status_code == 400 and not return400:
+        elif response.status_code == 403 and 'missing_cookie' in response.text:
+            # bambulab.com (the website host) requires a CSRF cookie that the API host
+            # never issues. Callers can recover by falling back to code login.
+            LOGGER.error("BLOCKED BY CSRF COOKIE REQUIREMENT")
+            raise CsrfError()
+        elif response.status_code == 429 and 'cloudflare' in response.text:
+            LOGGER.error("TEMPORARY 429 BLOCK BY CLOUDFLARE")
+            raise CloudflareError(response.status_code, response.text)
+        elif response.status_code == 400 and not return400:
             LOGGER.error(f"Connection failed with error code: {response.status_code}")
             LOGGER.debug(f"Response: '{response.text}'")
             raise PermissionError(response.status_code, response.text)
-
-        if response.status_code > 400:
+        elif response.status_code > 400:
             LOGGER.error(f"Connection failed with error code: {response.status_code}")
             LOGGER.debug(f"Response: '{response.text}'")
             raise PermissionError(response.status_code, response.text)
@@ -120,24 +141,28 @@ class BambuCloud:
         LOGGER.debug(f"Response: {response.status_code}")
 
     def _get(self, urlenum: BambuUrl):
-        url = get_Url(urlenum, self._region)
-        headers=self._get_headers_with_auth_token()
-        if CONNECTION_MECHANISM == ConnectionMechanismEnum.CURL_CFFI:
-            if not curl_available:
-                LOGGER.debug(f"Curl library is unavailable.")
-                raise CurlUnavailableError()
-            response = curl_requests.get(url, headers=headers, timeout=10, impersonate=IMPERSONATE_BROWSER)
-        elif CONNECTION_MECHANISM == ConnectionMechanismEnum.CLOUDSCRAPER:
-            if len(headers) == 0:
-                headers = self._get_headers()
-            scraper = cloudscraper.create_scraper()
-            response = scraper.get(url, headers=headers, timeout=10)
-        elif CONNECTION_MECHANISM == ConnectionMechanismEnum.REQUESTS:
-            if len(headers) == 0:
-                headers = self._get_headers()
-            response = requests.get(url, headers=headers, timeout=10)
-        else:
-            raise NotImplementedError()
+        try:
+            url = get_Url(urlenum, self._region)
+            headers=self._get_headers_with_auth_token()
+            if CONNECTION_MECHANISM == ConnectionMechanismEnum.CURL_CFFI:
+                if not curl_available:
+                    LOGGER.debug(f"Curl library is unavailable.")
+                    raise CurlUnavailableError()
+                response = curl_requests.get(url, headers=headers, timeout=10, impersonate=IMPERSONATE_BROWSER)
+            elif CONNECTION_MECHANISM == ConnectionMechanismEnum.CLOUDSCRAPER:
+                if len(headers) == 0:
+                    headers = self._get_headers()
+                scraper = cloudscraper.create_scraper()
+                response = scraper.get(url, headers=headers, timeout=10)
+            elif CONNECTION_MECHANISM == ConnectionMechanismEnum.REQUESTS:
+                if len(headers) == 0:
+                    headers = self._get_headers()
+                response = requests.get(url, headers=headers, timeout=10)
+            else:
+                raise NotImplementedError()
+        except Exception as e:
+            LOGGER.error(f"Connection to Bambu Cloud failed: {e}")
+            raise e
 
         self._test_response(response)
 
@@ -192,18 +217,22 @@ class BambuCloud:
             return ValueError(0) # FIXME
         elif loginType == 'verifyCode':
             LOGGER.debug(f"Received verifyCode response")
-            # raise EmailCodeRequiredError()
-            return loginType
+            raise CodeRequiredError()
         elif loginType == 'tfa':
             # Store the tfaKey for later use
             LOGGER.debug(f"Received tfa response")
             self._tfaKey = auth_json.get("tfaKey")
-            # raise TfaCodeRequiredError()
-            return loginType
+            raise TfaCodeRequiredError()
         else:
             LOGGER.debug(f"Did not understand json. loginType = '{loginType}'")
             LOGGER.error(f"Response not understood: '{response.text}'")
             return ValueError(1) # FIXME
+
+    def _get_new_code(self):
+        if '@' in self._email:
+            self._get_email_verification_code()
+        else:
+            self._get_sms_verification_code()
 
     def _get_email_verification_code(self):
         # Send the verification code request
@@ -212,8 +241,19 @@ class BambuCloud:
             "type": "codeLogin"
         }
 
-        LOGGER.debug("Requesting verification code")
+        LOGGER.debug("Requesting email verification code")
         self._post(BambuUrl.EMAIL_CODE, json=data)
+        LOGGER.debug("Verification code requested successfully.")
+
+    def _get_sms_verification_code(self):
+        # Send the verification code request
+        data = {
+            "phone": self._email,
+            "type": "codeLogin"
+        }
+
+        LOGGER.debug("Requesting SMS verification code")
+        self._post(BambuUrl.SMS_CODE, json=data)
         LOGGER.debug("Verification code requested successfully.")
 
     def _get_authentication_token_with_verification_code(self, code) -> dict:
@@ -228,16 +268,15 @@ class BambuCloud:
 
         if status_code == 200:
             LOGGER.debug("Authentication successful.")
-            LOGGER.debug(f"Response = '{response.json()}'")
         elif status_code == 400:
             LOGGER.debug(f"Received response: {response.json()}")
             if response.json()['code'] == 1:
                 # Code has expired. Request a new one.
-                self._get_email_verification_code()
-                raise EmailCodeExpiredError()
+                self._get_new_code()
+                raise CodeExpiredError()
             elif response.json()['code'] == 2:
                 # Code was incorrect. Let the user try again.
-                raise EmailCodeIncorrectError()
+                raise CodeIncorrectError()
             else:
                 LOGGER.error(f"Response not understood: '{response.json()}'")
                 raise ValueError(response.json()['code'])
@@ -271,22 +310,13 @@ class BambuCloud:
         tokens = self._auth_token.split(".")
         if len(tokens) != 3:
             LOGGER.debug("Received authToken is not a JWT.")
-            LOGGER.debug("Trying to use project API to retrieve username instead")
-            response = self.get_projects();
+            LOGGER.debug("Trying to use preference API to retrieve username instead")
+            response = self._get(BambuUrl.PREFERENCE)
             if response is not None:
-                projectsnode = response.get('projects', None)
-                if projectsnode is None:
-                    LOGGER.debug("Failed to find projects node")
-                else:
-                    if len(projectsnode) == 0:
-                        LOGGER.debug("No projects node in response")
-                    else:
-                        project=projectsnode[0]
-                        if project.get('user_id', None) is None:
-                            LOGGER.debug("No user_id entry")
-                        else:
-                            username = f"u_{project['user_id']}"
-                            LOGGER.debug(f"Found user_id of {username}")
+                uid = response.json().get('uid', None)
+                if uid is not None:
+                    username = f"u_{uid}"
+                    LOGGER.debug(f"Found user_id of {username[:7]}xxxxx")
         else:
             LOGGER.debug("Authentication token looks to be a JWT")
             try:
@@ -300,7 +330,7 @@ class BambuCloud:
                 LOGGER.debug("Unable to decode authToken to json to retrieve username.")
 
         if username is None:
-            LOGGER.debug(f"Unable to decode authToken to retrieve username. AuthToken = {self._auth_token}")
+            LOGGER.debug(f"Unable to decode authToken to retrieve username. AuthToken = {self._auth_token[:10]}xxxxx")
 
         return username
 
@@ -348,11 +378,8 @@ class BambuCloud:
         self._email = email
         self._username = username
         self._auth_token = auth_token
-        try:
-            self.get_device_list()
-        except:
-            return False
-        return True
+        result = self.get_device_list()
+        return False if result is None else True
 
     def login(self, region: str, email: str, password: str) -> str:
         self._region = region
@@ -360,17 +387,8 @@ class BambuCloud:
         self._password = password
 
         result = self._get_authentication_token()
-        if result is None:
-            LOGGER.error("Unable to authenticate.")
-            return None
-        elif len(result) < 20:
-            return result
-        else:
-            self._auth_token = result
-            self._username = self._get_username_from_authentication_token()
-            return 'success'
-        # self._auth_token = result
-        # self._username = self._get_username_from_authentication_token()
+        self._auth_token = result
+        self._username = self._get_username_from_authentication_token()
 
     def login_with_verification_code(self, code: str):
         result = self._get_authentication_token_with_verification_code(code)
@@ -378,6 +396,7 @@ class BambuCloud:
         self._username = self._get_username_from_authentication_token()
         if self._auth_token != "" and self._username != "" and self._auth_token != None and self._username != None:
             return "success"
+        return None
 
     def login_with_2fa_code(self, code: str):
         result = self._get_authentication_token_with_2fa_code(code)
@@ -385,6 +404,10 @@ class BambuCloud:
         self._username = self._get_username_from_authentication_token()
         if self._auth_token != "" and self._username != "" and self._auth_token != None and self._username != None:
             return "success"
+        return None
+
+    def request_new_code(self):
+        self._get_new_code()
 
     def get_device_list(self) -> dict:
         LOGGER.debug("Getting device list from Bambu Cloud")
@@ -467,7 +490,6 @@ class BambuCloud:
             response = self._get(BambuUrl.SLICER_SETTINGS)
         except:
             return None
-        LOGGER.debug("Succeeded")
         return response.json()
 
     # The task list is of the following form with a 'hits' array with typical 20 entries.
@@ -529,7 +551,7 @@ class BambuCloud:
     # "projects": [
     #     {
     #     "project_id": "164995388",
-    #     "user_id": "1688388450",
+    #     "user_id": "16xxxxx50",
     #     "model_id": "US48e2103d939bf8",
     #     "status": "ACTIVE",
     #     "name": "Alcohol_Marker_Storage_for_Copic,_Ohuhu_and_the_like",
@@ -569,8 +591,8 @@ class BambuCloud:
 
     def get_device_type_from_device_product_name(self, device_product_name: str):
         if device_product_name == "X1 Carbon":
-            return "X1C"
-        return device_product_name.replace(" ", "")
+            return Printers.X1C
+        return device_product_name.replace(" ", "").upper()
 
     def download(self, url: str) -> bytearray:
         LOGGER.debug(f"Downloading cover image: {url}")

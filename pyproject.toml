@@ -1,0 +1,47 @@
+[build-system]
+requires = [
+    "setuptools>=77",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OctoPrint-BambuPrinter"
+version = "0.1.8rc16"
+description = "Connects OctoPrint to BambuLabs printers."
+authors = [
+    { name = "jneilliii", email = "jneilliii+github@gmail.com" },
+]
+requires-python = ">=3.9,<4"
+dependencies = [
+    "Pillow>=10.0.0",
+    "paho-mqtt>=1.6.1",
+    "requests>=2.31.0",
+    "python-dateutil>=2.8.2",
+    "packaging>=23.0",
+    "beautifulsoup4>=4.12.0",
+]
+license = "AGPL-3.0-or-later"
+
+[project.entry-points."octoprint.plugin"]
+bambu_printer = "octoprint_bambu_printer"
+
+[project.urls]
+Homepage = "https://github.com/jneilliii/OctoPrint-BambuPrinter"
+
+[project.optional-dependencies]
+develop = [
+    "go-task-bin",
+]
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = [
+    "octoprint_bambu_printer",
+    "octoprint_bambu_printer.*",
+]

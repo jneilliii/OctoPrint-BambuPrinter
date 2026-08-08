@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-import queue
+import ftplib
+import functools
 import json
 import math
+import os
+import queue
 import re
 import socket
 import ssl
 import struct
 import threading
 import time
+import uuid
 
 from dataclasses import dataclass
 from typing import Any
@@ -27,7 +31,8 @@ from .commands import (
     PUSH_ALL,
     START_PUSH,
 )
-
+from .tests import MockMQTTClient
+from .utils import safe_json_loads
 
 class WatchdogThread(threading.Thread):
 
@@ -38,7 +43,6 @@ class WatchdogThread(threading.Thread):
         self._last_received_data = time.time()
         super().__init__()
         self.daemon = True
-        self.setName(f"{self._client._device.info.device_type}-Watchdog-{threading.get_native_id()}")
 
     def stop(self):
         self._stop_event.set()
@@ -47,9 +51,11 @@ class WatchdogThread(threading.Thread):
         self._last_received_data = time.time()
 
     def run(self):
-        LOGGER.info("Watchdog thread started.")
-        WATCHDOG_TIMER = 30
-        while True:
+        self.setName(f"{self._client._device.info.device_type}-Watchdog-{threading.get_native_id()}")
+        LOGGER.debug("Watchdog thread started.")
+
+        WATCHDOG_TIMER = 60
+        while not self._stop_event.is_set():
             # Wait out the remainder of the watchdog delay or 1s, whichever is higher.
             interval = time.time() - self._last_received_data
             wait_time = max(1, WATCHDOG_TIMER - interval)
@@ -64,28 +70,28 @@ class WatchdogThread(threading.Thread):
             elif interval < WATCHDOG_TIMER:
                 self._watchdog_fired = False
 
-        LOGGER.info("Watchdog thread exited.")
+        LOGGER.debug("Watchdog thread exited.")
 
 
 class ChamberImageThread(threading.Thread):
-    def __init__(self, client):
+    def __init__(self, client: BambuClient):
         self._client = client
         self._stop_event = threading.Event()
         super().__init__()
         self.daemon = True
-        self.setName(f"{self._client._device.info.device_type}-Chamber-{threading.get_native_id()}")
 
     def stop(self):
         self._stop_event.set()
 
     def run(self):
+        self.setName(f"{self._client._device.info.device_type}-Chamber-{threading.get_native_id()}")
         LOGGER.debug("Chamber image thread started.")
 
         auth_data = bytearray()
 
         username = 'bblp'
         access_code = self._client._access_code
-        hostname = self._client.host
+        hostname = self._client._device.info.ip_address
         port = 6000
         MAX_CONNECT_ATTEMPTS = 12
         connect_attempts = 0
@@ -103,9 +109,7 @@ class ChamberImageThread(threading.Thread):
         for i in range(0, 32 - len(access_code)):
             auth_data += struct.pack("<x")
 
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = self._client.local_tls_context
 
         jpeg_start = bytearray([0xff, 0xd8, 0xff, 0xe0])
         jpeg_end = bytearray([0xff, 0xd9])
@@ -142,24 +146,17 @@ class ChamberImageThread(threading.Thread):
                     except socket.error as e:
                         LOGGER.error(f"Socket error: {e}")
                         # Sleep to allow printer to stabilize during boot when it may fail these connection attempts repeatedly.
-                        time.sleep(1)
+                        if self._stop_event.wait(1):
+                            break
                         continue
 
                     sslSock.setblocking(False)
                     while not self._stop_event.is_set():
                         try:
                             dr = sslSock.recv(read_chunk_size)
-                            #LOGGER.debug(f"Received {len(dr)} bytes.")
-
                         except ssl.SSLWantReadError:
-                            #LOGGER.debug("SSLWantReadError")
-                            time.sleep(1)
-                            continue
-
-                        except Exception as e:
-                            LOGGER.error("A Chamber Image thread inner exception occurred:")
-                            LOGGER.error(f"Exception. Type: {type(e)} Args: {e}")
-                            time.sleep(1)
+                            if self._stop_event.wait(1):
+                                break
                             continue
 
                         if img is not None and len(dr) > 0:
@@ -181,7 +178,7 @@ class ChamberImageThread(threading.Thread):
 
                                 # Reset buffer
                                 img = None
-                            # else:     
+                            # else:
                             # Otherwise we need to continue looping without reseting the buffer to receive the remaining data
                             # and without delaying.
 
@@ -195,28 +192,26 @@ class ChamberImageThread(threading.Thread):
                         elif len(dr) == 0:
                             # This occurs if the wrong access code was provided.
                             LOGGER.error("Chamber image connection rejected by the printer. Check provided access code and IP address.")
-                            # Sleep for a short while and then re-attempt the connection.
-                            time.sleep(5)
-                            break
+                            raise RuntimeError("Received no data unexpectedly.")
 
                         else:
                             LOGGER.error(f"UNEXPECTED DATA RECEIVED: {len(dr)}")
-                            time.sleep(1)
+                            raise RuntimeError(f"Unexpected data chunk size received: {len(dr)}")
 
             except OSError as e:
                 if e.errno == 113:
                     LOGGER.debug("Host is unreachable")
                 else:
-                    LOGGER.error("A Chamber Image thread outer exception occurred:")
+                    LOGGER.error("Chamber Image thread outer exception occurred:")
                     LOGGER.error(f"Exception. Type: {type(e)} Args: {e}")
                 if not self._stop_event.is_set():
-                    time.sleep(1)  # Avoid a tight loop if this is a persistent error.
+                    time.sleep(2)  # Avoid a tight loop if this is a persistent error.
 
             except Exception as e:
-                LOGGER.error(f"A Chamber Image thread outer exception occurred:")
+                LOGGER.error(f"Chamber Image thread exception occurred:")
                 LOGGER.error(f"Exception. Type: {type(e)} Args: {e}")
                 if not self._stop_event.is_set():
-                    time.sleep(1)  # Avoid a tight loop if this is a persistent error.
+                    time.sleep(2)  # Avoid a tight loop if this is a persistent error.
 
         LOGGER.debug("Chamber image thread exited.")
 
@@ -227,90 +222,198 @@ class MqttThread(threading.Thread):
         self._stop_event = threading.Event()
         super().__init__()
         self.daemon = True
-        self.setName(f"{self._client._device.info.device_type}-Mqtt-{threading.get_native_id()}")
 
     def stop(self):
         self._stop_event.set()
 
     def run(self):
-        LOGGER.info("MQTT listener thread started.")
+        self.setName(f"{self._client._device.info.device_type}-Mqtt-{threading.get_native_id()}")
+        LOGGER.debug("MQTT listener thread started.")
+
         exceptionSeen = ""
-        while True:
+        connectionSuccessful = False
+        while not self._stop_event.is_set():
             try:
                 host = self._client.host if self._client._local_mqtt else self._client.bambu_cloud.cloud_mqtt_host
-                LOGGER.debug(f"Connect: Attempting Connection to {host}")
+                if connectionSuccessful:
+                    # Only log if we did successfully connect. A printer that is off will fail all connection attempts
+                    # so this avoids repetitive debug spew.
+                    LOGGER.debug(f"Connect: Attempting Connection to {host}")
+                connectionSuccessful = False
                 self._client.client.connect(host, self._client._port, keepalive=5)
+                connectionSuccessful = True
 
                 LOGGER.debug("Starting listen loop")
-                self._client.client.loop_forever()
+                self._client.client.loop_forever(retry_first_connection=False)
                 LOGGER.debug("Ended listen loop.")
                 break
             except TimeoutError as e:
                 if exceptionSeen != "TimeoutError":
                     LOGGER.debug(f"TimeoutError: {e}.")
                 exceptionSeen = "TimeoutError"
-                time.sleep(5)
+                if self._stop_event.wait(5):
+                    break
             except ConnectionError as e:
                 if exceptionSeen != "ConnectionError":
                     LOGGER.debug(f"ConnectionError: {e}.")
                 exceptionSeen = "ConnectionError"
-                time.sleep(5)
+                if self._stop_event.wait(5):
+                    break
             except OSError as e:
                 if e.errno == 113:
                     if exceptionSeen != "OSError113":
                         LOGGER.debug(f"OSError: {e}.")
                     exceptionSeen = "OSError113"
-                    time.sleep(5)
+                    if self._stop_event.wait(5):
+                        break
                 else:
                     LOGGER.error("A listener loop thread exception occurred:")
                     LOGGER.error(f"Exception. Type: {type(e)} Args: {e}")
-                    time.sleep(1)  # Avoid a tight loop if this is a persistent error.
+                    if self._stop_event.wait(1):  # Avoid a tight loop if this is a persistent error.
+                        break
             except Exception as e:
                 LOGGER.error("A listener loop thread exception occurred:")
                 LOGGER.error(f"Exception. Type: {type(e)} Args: {e}")
-                time.sleep(1)  # Avoid a tight loop if this is a persistent error.
+                if self._stop_event.wait(1):  # Avoid a tight loop if this is a persistent error.
+                    break
 
-            if self._client.client is None:
+            if self._client.client is None or self._stop_event.is_set():
                 break
 
-            self._client.client.disconnect()
+            try:
+                if connectionSuccessful:
+                    # Only log if we did successfully connect. A printer that is off will fail all connection attempts
+                    # so this avoids repetitive debug spew.
+                    LOGGER.debug("Sleeping for 5 seconds before trying to reconnect MQTT client.")
+                self._client.client.disconnect()
+            except Exception:
+                pass
 
-        LOGGER.info("MQTT listener thread exited.")
+        LOGGER.debug("MQTT listener thread exited.")
 
+class ImplicitFTP_TLS(ftplib.FTP_TLS):
+    """
+    FTP_TLS subclass that automatically wraps sockets in SSL to support implicit FTPS.
+    see https://stackoverflow.com/a/36049814
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._sock = None
+
+    @property
+    def sock(self):
+        """Return the socket."""
+        return self._sock
+
+    @sock.setter
+    def sock(self, value):
+        """When modifying the socket, ensure that it is ssl wrapped."""
+        if value is not None and not isinstance(value, ssl.SSLSocket):
+            value = self.context.wrap_socket(value)
+        self._sock = value
+
+    """
+    Increases relability with some printers
+    Courtesy @WolfwithSword
+    """
+    def ntransfercmd(self, cmd, rest=None):
+        conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
+        if self._prot_p:
+            session = self.sock.session
+            if isinstance(self.sock, ssl.SSLSocket):
+                session = self.sock.session
+            conn = self.context.wrap_socket(conn,
+                                            server_hostname=self.host,
+                                            session=session)
+        return conn, size
+
+    def storbinary_no_unwrap(self, cmd, fp, blocksize=8192, callback=None, rest=None):
+        """Version of storbinary that skips conn.unwrap() to avoid SSL timeout."""
+        self.voidcmd('TYPE I')
+        with self.transfercmd(cmd, rest) as conn:
+            while True:
+                buf = fp.read(blocksize)
+                if not buf:
+                    break
+                conn.sendall(buf)
+                if callback:
+                    callback(buf)
+            # SKIP conn.unwrap() which causes timeout
+            conn.close()
+        return self.voidresp()
 
 @dataclass
 class BambuClient:
     """Initialize Bambu Client to connect to MQTT Broker"""
     _watchdog = None
     _camera = None
-    _usage_hours: float
+    _mqtt = None
+    _usage_hours: float = 0
+    _test_mode: bool = False
+    _mock: bool = False
+    _last_error_code: int = 0
+    client = None
 
     def __init__(self, config):
+        self._config = config
         self.host = config['host']
         self._callback = None
+        self._test_mode = False
 
         self._access_code = config.get('access_code', '')
         self._auth_token = config.get('auth_token', '')
-        self._device_type = config.get('device_type', 'unknown')
+        self._device_type = config.get('device_type', 'unknown').upper()
         self._local_mqtt = config.get('local_mqtt', False)
-        self._manual_refresh_mode = config.get('manual_refresh_mode', False)
         self._serial = config.get('serial', '')
+        self._enable_camera = config.get('enable_camera', True) and (self.host != "")
+        self._enable_ftp = (self.host != "")
+        if self._serial.startswith('MOCK-'):
+            self._enable_ftp = False
+            self._enable_camera = False
+            self._mock = True
         self._usage_hours = config.get('usage_hours', 0)
         self._username = config.get('username', '')
-        self._enable_camera = config.get('enable_camera', True)
+        self._print_cache_count = max(-1, int(config.get('print_cache_count', 1)))
+        if self._print_cache_count == 0:
+            # We always cache at least one model as we use that to avoid redownloading from ftp on startup.
+            self._print_cache_count = 1
+        self._timelapse_cache_count = max(-1, int(config.get('timelapse_cache_count', 0)))
+        self._disable_ssl_verify = config.get('disable_ssl_verify', False)
+        self._cache_path = config.get('file_cache_path', f'/config/www/media/ha-bambulab/{self._serial}')
 
         self._connected = False
-        self._port = 1883
+        self._device_confirmed = False
+        self._port = 8883
         self._refreshed = False
+        self._last_error_code = 0
 
         self._device = Device(self)
         self.bambu_cloud = BambuCloud(
-            config.get('region', ''),
-            config.get('email', ''),
-            config.get('username', ''),
-            config.get('auth_token', '')
+            region = config.get('region', ''),
+            email = config.get('email', ''),
+            username = config.get('username', ''),
+            auth_token = config.get('auth_token', '')
         )
+        self._loaded_slicer_settings = False
         self.slicer_settings = SlicerSettings(self)
+        language = config.get('user_language', 'pt')
+        if 'zh' in language:
+            language = 'zh-CN'
+        else:
+            language = language[:2]
+        self._user_language = language
+
+    @property
+    def settings(self):
+        return self._config
+
+    @property
+    def cache_path(self):
+        return self._cache_path
+
+    @property
+    def user_language(self):
+        return self._user_language
 
     @property
     def connected(self):
@@ -318,52 +421,58 @@ class BambuClient:
         return self._connected
 
     @property
-    def manual_refresh_mode(self):
-        """Return if the integration is running in poll mode"""
-        return self._manual_refresh_mode
-
-    async def set_manual_refresh_mode(self, on):
-        self._manual_refresh_mode = on
-        if self._manual_refresh_mode:
-            # Disconnect from the server. User must manually hit the refresh button to connect to refresh and then it will immediately disconnect.
-            self.disconnect()
-        else:
-            # Reconnect normally
-            self.connect(self._callback)
-
-    @property
     def camera_enabled(self):
         return self._enable_camera
-    
+
     def callback(self, event: str):
         if self._callback is not None:
             self._callback(event)
 
     def set_camera_enabled(self, enable):
-        self._enable_camera = enable
+        self._enable_camera = enable and (self.host != "")
         if self._enable_camera:
-            self._start_camera()
+            self.start_camera()
         else:
-            self._stop_camera()
+            self.stop_camera()
+
+    @property
+    def ftp_enabled(self):
+        return self._enable_ftp
+
+    @property
+    def local_tls_context(self):
+        if self._disable_ssl_verify:
+            return create_insecure_ssl_context()
+        else:
+            return create_local_ssl_context()
 
     def setup_tls(self):
-        self.client.tls_set(tls_version=ssl.PROTOCOL_TLS, cert_reqs=ssl.CERT_NONE)
-        self.client.tls_insecure_set(True)
+        if self._local_mqtt:
+            self.client.tls_set_context(self.local_tls_context)
+            if self._disable_ssl_verify:
+                self.client.tls_insecure_set(True)
+        else:
+            self.client.tls_set()
 
     def connect(self, callback):
         """Connect to the MQTT Broker"""
-        self.client = mqtt.Client()
+        if self._mock:
+            self.client = MockMQTTClient(self._serial)
+        else:
+            self.client = mqtt.Client(client_id=f"ha-bambulab-{uuid.uuid4()}",
+                                      protocol=mqtt.MQTTv311,
+                                      clean_session=True)
+            self.client.enable_logger()
         self._callback = callback
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
         self.client.on_message = self.on_message
-        # Set aggressive reconnect polling.
-        self.client.reconnect_delay_set(min_delay=1, max_delay=1)
+        # Set reconnect polling back off. Starting at 1s doubling up to 30s between connection attempts.
+        self.client.reconnect_delay_set(min_delay=1, max_delay=30)
 
         # Run the blocking tls_set method in a separate thread
         self.setup_tls()
 
-        self._port = 8883
         if self._local_mqtt:
             self.client.username_pw_set("bblp", password=self._access_code)
         else:
@@ -374,13 +483,8 @@ class BambuClient:
         self._mqtt.start()
 
     def subscribe_and_request_info(self):
-        LOGGER.debug("Loading slicer settings...")
-        self.slicer_settings.update()
-        LOGGER.debug("Now subscribing...")
         self.subscribe()
-        LOGGER.debug("On Connect: Getting version info")
         self.publish(GET_VERSION)
-        LOGGER.debug("On Connect: Request push all")
         self.publish(PUSH_ALL)
 
     def on_connect(self,
@@ -390,67 +494,81 @@ class BambuClient:
                    result_code: int,
                    properties: mqtt.Properties | None = None, ):
         """Handle connection"""
-        LOGGER.info("On Connect: Connected to printer")
+        LOGGER.debug(f"On Connect: Connected to printer: {result_code}")
         self._on_connect()
 
-    def _start_camera(self):
+    def start_camera(self):
         if not self._device.supports_feature(Features.CAMERA_RTSP):
             if self._device.supports_feature(Features.CAMERA_IMAGE):
-                if self._enable_camera:
-                    LOGGER.debug("Starting Chamber Image thread")
-                    self._camera = ChamberImageThread(self)
-                    self._camera.start()
-            elif (self.host == "") or (self._access_code == ""):
-                LOGGER.debug("Skipping camera setup as local access details not provided.")
+                if self._enable_camera and not self._test_mode:
+                    if self._device.info.ip_address != "" and self._device.info.ip_address != "0.0.0.0" and self._access_code != "":
+                        LOGGER.debug("Starting Chamber Image thread")
+                        self._camera = ChamberImageThread(self)
+                        self._camera.start()
+                    else:
+                        LOGGER.debug("Skipping camera setup as local access details not provided.")
 
-    def _stop_camera(self):
+    def stop_camera(self):
         if self._camera is not None:
-            LOGGER.debug("Stopping camera thread")
+            LOGGER.debug("Stopping Chamber Image thread")
             self._camera.stop()
             self._camera.join()
+            self._camera = None
 
     def _on_connect(self):
         self._connected = True
+        self._device_confirmed = False
+
         self.subscribe_and_request_info()
 
-        LOGGER.debug("Starting watchdog thread")
-        self._watchdog = WatchdogThread(self)
-        self._watchdog.start()
+    def _on_device_confirmed(self):
+        """Called on first data payload received from the printer after connection."""
+        if self._device_confirmed:
+            return
+        self._device_confirmed = True
+        LOGGER.debug("Device confirmed: first data payload received from printer")
 
-        self._start_camera()
+        if self._device.info.ip_address != "" and self._device.info.ip_address != "0.0.0.0":
+            LOGGER.debug("Starting watchdog thread")
+            self._watchdog = WatchdogThread(self)
+            self._watchdog.start()
 
-    def try_on_connect(self,
-                       client_: mqtt.Client,
-                       userdata: None,
-                       flags: dict[str, Any],
-                       result_code: int,
-                       properties: mqtt.Properties | None = None, ):
-        """Handle connection"""
-        LOGGER.info("On Connect: Connected to printer")
-        self._connected = True
-        LOGGER.debug("Now test subscribing...")
-        self.subscribe()
-        # For the initial configuration connection attempt, we just need version info.
-        LOGGER.debug("On Connect: Getting version info")
-        self.publish(GET_VERSION)
+        # Start camera if enabled
+        self.start_camera()
 
     def on_disconnect(self,
                       client_: mqtt.Client,
                       userdata: None,
                       result_code: int):
         """Called when MQTT Disconnects"""
-        LOGGER.warn(f"On Disconnect: Printer disconnected with error code: {result_code}")
+        if (result_code == 0):
+            LOGGER.debug(f"On Disconnect: Printer disconnected cleanly")
+        else:
+            if self._last_error_code != result_code:
+                if result_code == 5:
+                    LOGGER.error(f"On Disconnect: Printer disconnected with Access Denied error. Check serial, access code and IP address.")
+                else:
+                    LOGGER.debug(f"On Disconnect: Printer disconnected with error code: {result_code}")
+            else:
+                LOGGER.debug(f"On Disconnect: Printer disconnected with error code: {result_code}")
+        self._last_error_code = result_code
         self._on_disconnect()
-    
+        if self._last_error_code == 5:
+            # Error code 5 is access denied. This is not likely to resolve itself. Do not loop forever.
+            self.client.disconnect()
+
     def _on_disconnect(self):
         LOGGER.debug("_on_disconnect: Lost connection to the printer")
+        self._loaded_slicer_settings = False
         self._connected = False
+        self._device_confirmed = False
         self._device.info.set_online(False)
         if self._watchdog is not None:
             LOGGER.debug("Stopping watchdog thread")
             self._watchdog.stop()
-            self._watchdog.join()
-        self._stop_camera()
+            if self._watchdog is not threading.current_thread():
+                self._watchdog.join()
+        self.stop_camera()
 
     def _on_watchdog_fired(self):
         LOGGER.info("Watch dog fired")
@@ -458,17 +576,30 @@ class BambuClient:
         self.publish(START_PUSH)
 
     def on_jpeg_received(self, bytes):
-        self._device.chamber_image.set_jpeg(bytes)
+        self._device.chamber_image.set_image(bytes)
 
     def on_message(self, client, userdata, message):
         """Return the payload when received"""
         try:
-            # X1 mqtt payload is inconsistent. Adjust it for consistent logging.
-            clean_msg = re.sub(r"\\n *", "", str(message.payload))
+            if self.client is None:
+                # We have been shut down. Drop any messages we receive late.
+                return
+
+            if not self._loaded_slicer_settings:
+                # Only update slicer settings once per successful connection to the printer.
+                self._loaded_slicer_settings = True
+                self.slicer_settings.update()
+
             if self._refreshed:
+                # X1 mqtt payload is inconsistent. Adjust it for consistent logging.
+                clean_msg = re.sub(r"\\n *", "", str(message.payload))
+                # And adjust all payload to be meet proper json syntax instead of being pythonized so I can feed it directly into an online json prettifier
+                clean_msg = re.sub(r"\'", "\"", str(clean_msg))
+                clean_msg = re.sub(r"True", "true", str(clean_msg))
+                clean_msg = re.sub(r"False", "false", str(clean_msg))
                 LOGGER.debug(f"Received data: {clean_msg}")
 
-            json_data = json.loads(message.payload)
+            json_data = safe_json_loads(message.payload)
             if json_data.get("event"):
                 # These are events from the bambu cloud mqtt feed and allow us to detect when a local
                 # device has connected/disconnected (e.g. turned on/off)
@@ -481,19 +612,22 @@ class BambuClient:
                     self._on_disconnect()
             else:
                 self._device.info.set_online(True)
-                self._watchdog.received_data()
+                self._on_device_confirmed()
+                if self._watchdog is not None:
+                    self._watchdog.received_data()
                 if json_data.get("print"):
                     self._device.print_update(data=json_data.get("print"))
-                    # Once we receive data, if in manual refresh mode, we disconnect again.
-                    if self._manual_refresh_mode:
-                        self.disconnect()
                     if json_data.get("print").get("msg", 0) == 0:
                         self._refreshed= False
                 elif json_data.get("info") and json_data.get("info").get("command") == "get_version":
-                    LOGGER.debug("Got Version Data")
                     self._device.info_update(data=json_data.get("info"))
+                elif json_data.get("system") and json_data.get("system").get("command"):
+                    self._device.observe_system_command(data=json_data.get("system"))
+
+
         except Exception as e:
             LOGGER.error("An exception occurred processing a message:", exc_info=e)
+            LOGGER.debug(message.payload)
 
     def subscribe(self):
         """Subscribe to report topic"""
@@ -503,7 +637,7 @@ class BambuClient:
     def publish(self, msg):
         """Publish a custom message"""
         result = self.client.publish(f"device/{self._serial}/request", json.dumps(msg))
-        status = result[0]
+        status = result.rc
         if status == 0:
             LOGGER.debug(f"Sent {msg} to topic device/{self._serial}/request")
             return True
@@ -513,18 +647,12 @@ class BambuClient:
 
     async def refresh(self):
         """Force refresh data"""
-
-        if self._manual_refresh_mode:
-            self.connect(self._callback)
-        else:
-            LOGGER.debug("Force Refresh: Getting Version Info")
-            self._refreshed = True
-            self.publish(GET_VERSION)
-            LOGGER.debug("Force Refresh: Request Push All")
-            self._refreshed = True
-            self.publish(PUSH_ALL)
-
-        self.slicer_settings.update()
+        LOGGER.debug("Force Refresh: Getting Version Info")
+        self._refreshed = True
+        self.publish(GET_VERSION)
+        LOGGER.debug("Force Refresh: Request Push All")
+        self._refreshed = True
+        self.publish(PUSH_ALL)
 
     def get_device(self):
         """Return device"""
@@ -532,52 +660,148 @@ class BambuClient:
 
     def disconnect(self):
         """Disconnect the Bambu Client from server"""
-        LOGGER.debug(" Disconnect: Client Disconnecting")
+        LOGGER.debug("Disconnect: Client Disconnecting")
+
+        # Stop and wait for background threads
+        if self._mqtt is not None:
+            LOGGER.debug("Stopping MQTT thread")
+            self._mqtt.stop()
+            self._mqtt.join(timeout=5)
+            self._mqtt = None
+
+        if self._watchdog is not None:
+            LOGGER.debug("Stopping watchdog thread")
+            self._watchdog.stop()
+            self._watchdog.join(timeout=5)
+            self._watchdog = None
+
+        if self._camera is not None:
+            LOGGER.debug("Stopping camera thread")
+            self._camera.stop()
+            self._camera.join(timeout=5)
+            self._camera = None
+
+        # Disconnect MQTT client
         if self.client is not None:
-            self.client.disconnect()
-            self.client = None
+            try:
+                self.client.loop_stop()
+                self.client.disconnect()
+            except Exception as e:
+                LOGGER.debug(f"Error during MQTT disconnect: {e}")
+            finally:
+                self.client = None
+
+
+    def ftp_connection(self) -> ImplicitFTP_TLS:
+        ftp = ImplicitFTP_TLS(context=self.local_tls_context)
+        ftp.connect(host=self._device.info.ip_address, port=990, timeout=15)
+        ftp.login(user='bblp', passwd=self._access_code)
+        ftp.prot_p()
+        return ftp
 
     async def try_connection(self):
         """Test if we can connect to an MQTT broker."""
         LOGGER.debug("Try Connection")
 
-        result: queue.Queue[bool] = queue.Queue(maxsize=1)
+        result: queue.Queue[int] = queue.Queue(maxsize=1)
 
-        def on_message(client, userdata, message):
-            json_data = json.loads(message.payload)
-            LOGGER.debug(f"Try Connection: Got '{json_data}'")
+        self.received_info = False
+        self.received_push = False
+
+        def try_on_connect(client_: mqtt.Client,
+                           userdata: None,
+                           flags: dict[str, Any],
+                           result_code: int,
+                           properties: mqtt.Properties | None = None, ):
+
+            LOGGER.debug(f"try_on_connect: Connected to printer: {result_code}")
+            self.subscribe_and_request_info()
+
+        def try_on_disconnect(client_: mqtt.Client,
+                              userdata: None,
+                              result_code: int):
+            """Called when MQTT Disconnects"""
+            LOGGER.debug("try_on_disconnect: Lost connection to the printer")
+            if (result_code == 0):
+                LOGGER.debug(f"Printer disconnected cleanly")
+            else:
+                LOGGER.warning(f"Printer disconnected with error code: {result_code}")
+                result.put(result_code)
+
+            try_disconnect()
+
+        def try_disconnect():
+            if self.client is not None:
+                try:
+                    self.client.loop_stop()
+                    self.client.disconnect()
+                except Exception as e:
+                    LOGGER.debug(f"Error during MQTT disconnect: {e}")
+                finally:
+                    self.client = None
+
+        def try_on_message(client, userdata, message):
+            json_data = safe_json_loads(message.payload)
+
+            # X1 mqtt payload is inconsistent. Adjust it for consistent logging.
+            clean_msg = re.sub(r"\\n *", "", str(message.payload))
+            # And adjust all payload to be meet proper json syntax instead of being pythonized so I can feed it directly into an online json prettifier
+            clean_msg = re.sub(r"\'", "\"", str(clean_msg))
+            clean_msg = re.sub(r"True", "true", str(clean_msg))
+            clean_msg = re.sub(r"False", "false", str(clean_msg))
+
+            LOGGER.debug(f"try_on_message: Got '{clean_msg}'")
             if json_data.get("info") and json_data.get("info").get("command") == "get_version":
                 LOGGER.debug("Got Version Command Data")
                 self._device.info_update(data=json_data.get("info"))
-                result.put(True)
+                self.received_info = True
+            if (json_data.get('print', {}).get('command', '') == 'push_status') and (json_data.get('print', {}).get('msg', 0) == 0):
+                self._device.print_update(data=json_data.get("print"))
+                self.received_push = True
+            # Observe system command is not needed here because it is not an initial message.
 
-        self.client = mqtt.Client()
-        self.client.on_connect = self.try_on_connect
-        self.client.on_disconnect = self.on_disconnect
-        self.client.on_message = on_message
+            if self.received_info and self.received_push:
+                result.put(0)
+
+        self._test_mode = True
+        if self._mock:
+            self.client = MockMQTTClient(self._serial)
+        else:
+            self.client = mqtt.Client()
+        self.client.on_connect = try_on_connect
+        self.client.on_disconnect = try_on_disconnect
+        self.client.on_message = try_on_message
 
         # Run the blocking tls_set method in a separate thread
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self.setup_tls)
-        
+
+        host = self.host if self._local_mqtt else self.bambu_cloud.cloud_mqtt_host
         if self._local_mqtt:
             self.client.username_pw_set("bblp", password=self._access_code)
         else:
             self.client.username_pw_set(self._username, password=self._auth_token)
-        self._port = 8883
 
-        LOGGER.debug("Test connection: Connecting to %s", self.host)
+        LOGGER.debug(f"Test connection: Connecting to {host}")
         try:
-            self.client.connect(self.host, self._port)
+            self.client.connect(host, self._port)
             self.client.loop_start()
-            if result.get(timeout=10):
-                return True
+            LOGGER.debug("Waiting for reponse.")
+            return_result = result.get(timeout=10)
+            if return_result == 0:
+                LOGGER.debug("Connection test was successful")
+            else:
+                LOGGER.debug(f"Connection test failed with result: {return_result}")
+            return return_result
         except OSError as e:
-            return False
+            LOGGER.error(f"Connection test to '{host}' failed: {type(e)} Args: {e}")
+            return e.errno
         except queue.Empty:
-            return False
+            LOGGER.error(f"Connection test to '{host}' failed with timeout")
+            return -1
         finally:
-            self.disconnect()
+            # Make sure we definitely clean up in all paths.
+            try_disconnect()
 
     async def __aenter__(self):
         """Async enter.
@@ -592,3 +816,33 @@ class BambuClient:
             _exc_info: Exec type.
         """
         self.disconnect()
+
+    def download_3mf_and_extract_metadata(self, model_file, thumbnail_cache_path=None):
+        return self._device.print_job.extract_3mf_metadata(model_file, thumbnail_cache_path=thumbnail_cache_path)
+
+@functools.lru_cache(maxsize=1)
+def create_local_ssl_context():
+    """
+    This context validates the certificate for TLS connections to local printers.
+    """
+    script_path = os.path.abspath(__file__)
+    directory_path = os.path.dirname(script_path)
+    context = ssl.create_default_context()
+    certs_dir = os.path.join(directory_path, "certs")
+    for filename in os.listdir(certs_dir):
+        if filename.endswith(".cert"):
+            context.load_verify_locations(cafile=os.path.join(certs_dir, filename))
+
+    # Ignore "CA cert does not include key usage extension" error since python 3.13
+    # See note in https://docs.python.org/3/library/ssl.html#ssl.create_default_context
+    context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    # Workaround because some users get this error despite SNI: "certificate verify failed: IP address mismatch"
+    context.check_hostname = False
+    return context
+
+@functools.lru_cache(maxsize=1)
+def create_insecure_ssl_context():
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
