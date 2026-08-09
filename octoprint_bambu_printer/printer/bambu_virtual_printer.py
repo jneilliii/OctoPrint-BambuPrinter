@@ -276,6 +276,7 @@ class BambuVirtualPrinter:
         )
         bambu_client.on_disconnect = self.on_disconnect(bambu_client.on_disconnect)
         bambu_client.on_connect = self.on_connect(bambu_client.on_connect)
+        bambu_client.set_camera_enabled(False)
         bambu_client.connect(callback=self.new_update)
         self._log.debug(f"bambu connection status: {bambu_client.connected}")
         self.sendOk()
