@@ -87,8 +87,10 @@ class BambuPrintPlugin(
                 }
 
     def on_after_startup(self):
-        if not os.path.exists(os.path.join(self.get_plugin_data_folder(), "thumbs", "no_thumb.png")):
+        plugin_data_folder = self.get_plugin_data_folder()
+        if not os.path.exists(os.path.join(plugin_data_folder, "thumbs", "no_thumb.png")):
             self._logger.info("Creating no_thumb.png")
+            os.makedirs(os.path.join(plugin_data_folder, "thumbs"), exist_ok=True)
             shutil.copy(os.path.join(self._basefolder, "static", "img", "no_thumb.png"), os.path.join(self.get_plugin_data_folder(), "thumbs"))
 
     def get_template_configs(self):
