@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "OctoPrint-BambuPrinter"
-version = "0.1.8rc16"
+version = "0.1.8rc17"
 description = "Connects OctoPrint to BambuLabs printers."
 authors = [
     { name = "jneilliii", email = "jneilliii+github@gmail.com" },
